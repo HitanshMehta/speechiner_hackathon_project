@@ -30,8 +30,27 @@ Every update still needs a quote found in the transcript. The check now also acc
 
 - A time stated without am/pm is shown as said ("quarter past 11" is 11:15 even if the model writes 23:15).
   "at night" and "tonight" mark the evening.
-- Booking requests are spaced at least 2 s apart (was 4 s), and the gate treats spelling variants as options.
+- Booking requests are spaced at least 1 s apart (was 4 s), and the gate treats spelling variants as options.
 - Each dropped proposal is logged in `calls.jsonl` under `delta_diagnostics.dropped` with its reason.
+
+### Rules added while tuning on Gemini 2.5 Flash
+
+- Dictated numbers (`strategies/dictation.py`): the agent's ask ("may I have your id number") or the caller's
+  "my telephone number is" picks the field. Each caller group extends the number as soon as it is heard, and
+  "double 1" is 11. Agent echoes and backchannels keep the dictation open. While a number is being dictated,
+  the model cannot write either number field. Afterwards it cannot copy those digits into the other field.
+- "My name is mary edwards" fills an empty name at once; the model may still correct it.
+- An agent answer to the caller's question ("what is the address?") is information, not a caller value.
+- An area given as the opposite of another ("the opposite side of the north") grounds the other direction.
+- An option the recognizer misspelled ("depart from kingsland") grounds `kings lynn` when that option is at
+  least 0.75 similar and clearly closer than any other option. Options shorter than six letters never match.
+- "looking for train" without a subject, and "a place to stay", select the service locally.
+- A quote may differ from the transcript in one non-number word when it has five or more words.
+- Meetings: a topic needs only a quoted passage, not its name. A meeting quote is also grounded by any run of
+  six words in a row that the transcript says, so a quote that spans speakers still counts. Several notes for
+  one field in one reply are merged.
+- One timed-out request counts its reserve as spent and no longer stops the run. Three unresolved failures
+  in a row still stop it.
 
 `tests/test_extractor_rules.py` holds the regressions, with synthetic phrasings beyond the pilot calls.
 `scripts/scripted_sng1193.py` replays SNG1193 with scripted replies that make the pilot's mistakes, so the
@@ -70,8 +89,9 @@ OpenRouter for the selected model.
 | `LFE_OPENROUTER_ENABLE_PAID` | Set to `1` only for an authorized live run |
 
 The extractor logs completed attempts and uses OpenRouter's billed total for cost when supplied. The configured
-rates are used for reservations and as a fallback. A missing charge stops further requests when cost cannot
-be computed. An interrupted request can still bill at OpenRouter. The local cap resets per process, so set
+rates are used for reservations and as a fallback. A request whose charge is unknown (a timeout or a missing
+billed total) counts its full reserve as spent. Three in a row stop further requests. An interrupted request
+can still bill at OpenRouter, but `max_tokens` and `max_price` bound it by the reserve. The local cap resets per process, so set
 a provider-side key limit at the team's $20 ceiling for cumulative enforcement.
 
 After live testing is authorized, start with `SNG0877`, the shortest bundled conversation at about 60 seconds.
