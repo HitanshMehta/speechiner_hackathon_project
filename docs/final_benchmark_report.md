@@ -13,6 +13,53 @@ earlier tuning runs are excluded from this comparison.
 | AMI baseline | `speechineer/20261117-183600-speechineer-openrouter-gemini-25-flash-extraction-ami` |
 | AMI ours | `runs/20261121-170950-gated-flash-v5-ami` |
 
+## Presented version (C, commit `f354c34`)
+
+Version C keeps everything below and adds three cost and accuracy changes: the whole system prompt is cached
+explicitly, the fields are described one per line with shared option lists, and booking forms get a reply schema
+without the always-empty `facts` array. It also fixes local rules that missed on new calls: a phone number read
+back with "yes, i got that", "i'm also looking for a train", a surname asked for on its own, and "my name is
+called ...".
+
+### Official SpokenWOZ bench (6 calls, run `runs/20261121-183941-gated-flash-v14b-repeat-spokenwoz`)
+
+| Metric | Saved Speechineer | Version C |
+|---|---|---|
+| Extraction calls per form | 70.2 | **47.3** |
+| Cost per form | €0.0243 | **€0.0059** (−76%) |
+| Input read from cache | 72% | **92%** |
+| Expected values correct | **57/58** | 56/58 |
+| Wrong / missing / extra values | 1 / 0 / 8 | **0** / 2 / **4** |
+| Final F1 | 91.9% | **94.9%** |
+| Precision | 0.867 | **0.911** |
+| Benchmark speed | **0.837** | 0.775 |
+| Outcome | 0.932 | **0.946** |
+| Median time to a stable correct value | 1.74 s | **0.80 s** |
+| Joint goal accuracy | 49.5% | **54.8%** |
+| Overall benchmark score | **0.899** | 0.889 |
+
+A repeat run gave the same 0.889, so this is not noise. Almost all of the gap is one call: in MUL2746 the caller
+says "i'd like to live the place of attraction by 11 a. m." and the model files 11:00 as the taxi arrival time
+instead of the departure time. Version A below scores 0.908 on the same calls.
+
+### 24 more SpokenWOZ test calls
+
+`scripts/extra_spokenwoz.py` builds further calls from the public SpokenWOZ test text with a simpler answer
+key (a value counts as said at the end of its span or turn). These scores compare our own versions only; the
+saved baseline has no runs on these calls.
+
+| Version | Official 6: score | Official 6: € per form | 24 extra: score | 24 extra: € per form |
+|---|---|---|---|---|
+| Final before this work (`1987a65`) | 0.907 | 0.0114 | 0.735 | 0.0081 |
+| A: explicit cache + compact fields | 0.908 | 0.0062 | 0.743 | 0.0047 |
+| B: A + rule fixes | 0.897 | 0.0062 | 0.752 | 0.0047 |
+| **C: B + set-only replies** | 0.889 | **0.0059** | **0.764** | **0.0044** |
+
+Across all 30 calls, C has the highest score and the lowest cost. The meeting (AMI) path is unchanged: caching
+gives no saving there (€0.0228 vs €0.0219 per form), so the AMI numbers below still hold.
+
+## Earlier final version (commit `1987a65`)
+
 ## SpokenWOZ (6 booking calls, 14.5 min of audio)
 
 | Metric | Saved Speechineer | Gated Gemini 2.5 Flash |
