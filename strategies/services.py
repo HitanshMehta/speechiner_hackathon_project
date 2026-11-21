@@ -28,6 +28,8 @@ _RETRACTION = re.compile(
     r"(?:i|we) (?:don't|do not|no longer) (?:need|want|require)\b)"
 )
 _CLAUSE = re.compile(r"([^.!?;]+)([.!?;]|$)")
+# A caller asking to book a table is asking for a restaurant even without the word.
+_TABLE = re.compile(r"\b(?:book|reserve|get|need|want|like) (?:a|us a|me a) table\b(?! (?:lamp|cloth))")
 _NOUNS = {"hotel": re.compile(r"^rooms?\b"), "train": re.compile(r"^tickets?\b")}
 
 
@@ -80,6 +82,8 @@ def _piece_services(
             services.clear()
         elif not first_only or index == 0:
             services.update(_clause_services(clause, options, option_pattern, complete=finished or bool(separator)))
+            if "restaurant" in options and _TABLE.search(clause) and (finished or separator):
+                services.add(options["restaurant"])
     return services
 
 

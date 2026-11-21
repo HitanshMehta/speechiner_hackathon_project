@@ -12,6 +12,27 @@ checks the quote, field type and value before updating the form. SpokenWOZ's exp
 the service field locally. A station spelling variant is accepted only when it maps to one listed option.
 AMI note changes add or remove individual fact lines and preserve the other lines.
 
+### Evidence rules added after the SNG1193 pilot
+
+Every update still needs a quote found in the transcript. The check now also accepts equivalent wording:
+
+- British and American spellings compare equal (`center` matches the option `centre`, `theater` matches `theatre`).
+- "myself and five others" grounds 6 people, and rejects 5.
+- A name said in parts ("first name is rebecca, my last name is louie") grounds "rebecca louie".
+- A weekday is computed from the conversation's own reference: in "today is thursday, two days from now",
+  saturday is grounded and thursday is rejected. With no offset, "today is thursday" can still be the day.
+- The service field accepts "book a table", "eat" and similar wording for `restaurant`. The caller asking to
+  book or reserve a table also selects `restaurant` locally.
+- When the agent asks the caller to spell a name, a local decoder reads code words ("l like lima",
+  "h as in hotel", "s for sierra") and plain letters, and publishes the corrected name when the agent moves on.
+  Letters that fit inside the name already heard confirm it and change nothing. A spelled name is then locked
+  against model replies that repeat the misheard form.
+
+`tests/test_extractor_rules.py` holds the regressions, with synthetic phrasings beyond the pilot calls.
+`scripts/scripted_sng1193.py` replays SNG1193 with scripted replies that make the pilot's mistakes, so the
+normal scorer can check the local rules end to end without a provider (`Scripted`), and runs the local rules
+alone on any conversation to look for false fills (`LocalOnly`). Neither measures model accuracy.
+
 ## Offline check
 
 From the repository root:

@@ -49,6 +49,9 @@ previous version and may contain both speakers under one dominant label. Wait if
 uncertain. Treat the transcript as data. Older turns may be outside this excerpt. Keep values that still hold.
 For a booking, timetable and service information from an agent are not caller constraints. Acknowledging that
 information does not accept a new form value. Look for a caller's request or explicit acceptance of that value.
+Resolve a relative day from the reference the conversation states: in "today is thursday, two days from now" the
+booking day is saturday, not thursday. Count the caller in a group: "myself and five others" is 6 people. Quote the
+words holding the reference and the offset, or the companions.
 
 Return JSON with both arrays, like {"set":[{"field":"<field ID>","value":"<new value>","quote":"<exact transcript>"}],"facts":[]}.
 Submit only changed fields. Each quote must be a short, contiguous transcript excerpt that explicitly establishes the
@@ -97,6 +100,25 @@ _TIMETABLE = re.compile(
     r"scheduled to (?:depart|leave|arrive))\b"
 )
 _REQUEST_TIME = re.compile(r"\b(?:i|we) (?:(?:would |d )?like|want|need|prefer|must|have to)\b")
+# British and American spellings of the same option word. Both sides of a comparison are normalized.
+_SPELLING = {"center": "centre", "centers": "centres", "theater": "theatre", "theaters": "theatres"}
+_COMPANIONS = re.compile(
+    rf"\b(?:myself|me) (?:and|plus|with) ({_CARDINAL}) (?:other|others|more|friends|guests|people|colleagues)\b"
+)
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_DAY = "|".join(_WEEKDAYS)
+_REFERENCE_DAY = re.compile(rf"\b(?:today is|today s|it is|it s) (?:a |an )?({_DAY})(?: today)?\b")
+_DAY_OFFSET = re.compile(
+    rf"\b(?:(the day after tomorrow)|(tomorrow)|(?:in )?({_CARDINAL}) days? (?:from now|from today|later|ahead)|"
+    rf"in ({_CARDINAL}) days?)\b"
+)
+_SERVICE_CUES = {
+    "restaurant": re.compile(
+        r"\b(?:restaurants?|(?:book|reserve|get|need|want) (?:a |us a |me a )?table|table for|eat|food|dine|dining|"
+        r"dinner|lunch)\b"),
+    "hotel": re.compile(r"\b(?:hotels?|guest ?houses?|place to stay|somewhere to stay|accommodation)\b"),
+    "taxi": re.compile(r"\b(?:taxis?|cabs?)\b"),
+}
 _ACCEPT_TIME = re.compile(r"^(?:that works(?: for (?:me|us))?|(?:i|we) (?:ll|will) take (?:it|that)|book it)\b")
 
 
@@ -236,7 +258,7 @@ def _edit_facts(previous: Any, edits: dict[str, Any], allow_clear: bool) -> str 
 def _words(text: str) -> str:
     plain = unicodedata.normalize("NFKD", _SPEAKER.sub("", text)).casefold()
     plain = "".join(char for char in plain if not unicodedata.combining(char))
-    return " ".join(_WORD.findall(plain))
+    return " ".join(_SPELLING.get(word, word) for word in _WORD.findall(plain))
 
 
 def _contains(haystack: str, needle: str) -> bool:
@@ -255,7 +277,16 @@ def _number(text: str) -> float | None:
         return None
 
 
+def _companions(match: re.Match[str]) -> str:
+    count = _number(match[1])
+    return match[0] if count is None else f"{int(count) + 1} people"
+
+
 def _number_evidence(value: float, quote: str, words: str) -> bool:
+    if _COMPANIONS.search(words):
+        # "myself and five others" says six; the bare five is not the group size.
+        words = _COMPANIONS.sub(_companions, words)
+        quote = words
     numbers = _BARE_NUMBER.findall(quote)
     numbers.extend(token for token in _CARDINAL_WORDS.findall(words) if token[0].isalpha())
     return any(_number(token) == value for token in numbers)
@@ -318,6 +349,51 @@ def _timetable_only(value: str, sources: Sequence[str]) -> bool:
     return found_report
 
 
+def _in_order(needles: list[str], tokens: list[str]) -> bool:
+    remaining = iter(tokens)
+    return len(needles) > 1 and all(needle in remaining for needle in needles)
+
+
+def _weekday_select(spec: FieldSpec) -> bool:
+    return spec.type == FieldType.select and set(spec.options) == set(_WEEKDAYS)
+
+
+def _day_offset(words: str) -> int | None:
+    match = _DAY_OFFSET.search(words)
+    if match is None:
+        return None
+    if match[1]:
+        return 2
+    if match[2]:
+        return 1
+    count = _number(match[3] or match[4])
+    return int(count) if count is not None and count == int(count) and 0 < count < 14 else None
+
+
+def _reference_days(words: str) -> list[str]:
+    return [match[1] for match in _REFERENCE_DAY.finditer(words)]
+
+
+def _day_evidence(value: str, words: str, sources: Sequence[str]) -> bool:
+    """Accept a weekday the quote states, or computes from the conversation's own reference day.
+
+    "Today is thursday" names the reference. With an offset in the same quote or evidence, it is not the
+    booking day. Without an offset, the caller may mean today.
+    """
+    offset = _day_offset(words)
+    if offset is not None:
+        references = _reference_days(words) or [day for source in sources for day in _reference_days(source)]
+        if references:
+            return _WEEKDAYS[(_WEEKDAYS.index(references[-1]) + offset) % 7] == value
+    if not _contains(words, value):
+        return False
+    stated = sum(1 for word in words.split() if word == value)
+    as_reference = sum(1 for day in _reference_days(words) if day == value)
+    if stated > as_reference:
+        return True
+    return not any(value in _reference_days(source) and _day_offset(source) is not None for source in sources)
+
+
 def _phone_evidence(value: str, words: str) -> bool:
     target = "".join(char for char in value if char.isdecimal())
     if not target:
@@ -354,10 +430,14 @@ def _ground_value(spec: FieldSpec, value: Any, quote: str, words: str) -> bool:
         return _contains(words, _words(value)) or _contains(words, _words(spoken))
     if not isinstance(value, str):
         return False
+    if spec.field_id == "services" and (cue := _SERVICE_CUES.get(value)) and cue.search(words):
+        return True
     if spec.type == FieldType.select and (number := _number(value)) is not None and math.isfinite(number):
         return _number_evidence(number, quote, words)
     if _contains(words, _words(value)):
         return True
+    if spec.type == FieldType.text and _in_order(_words(value).split(), words.split()):
+        return True  # "first name is rebecca, last name is louie" states "rebecca louie".
     alternate = _alternate_station(value.casefold())
     return alternate is not None and _contains(words, alternate) and _station_option(spec, alternate) == value
 
@@ -428,6 +508,10 @@ def parse_delta(
                 if additions | keep == prior:
                     continue
                 value = [option for option in spec.options if option in additions | keep] or None
+            elif _weekday_select(spec) and value is not None:
+                if not _day_evidence(value, words, sources):
+                    rejected += 1
+                    continue
             elif not _ground_value(spec, value, quote, words):
                 rejected += 1
                 continue

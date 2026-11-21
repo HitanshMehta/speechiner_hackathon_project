@@ -1,0 +1,230 @@
+"""Offline regressions for the gated extractor's evidence checks and local rules. No provider access."""
+
+import json
+
+import pytest
+
+from live_form_eval import Partial, load_config
+from live_form_eval.data.common.store import load_dataset
+from strategies.delta import parse_delta
+from strategies.services import requested_services
+from strategies.spelling import SpelledName
+
+
+@pytest.fixture(scope="module")
+def form():
+    data = load_dataset(load_config(), "spokenwoz", official_sample=True)
+    return next(iter(data.forms.values()))
+
+
+def op(field_id, value, quote):
+    return json.dumps({"set": [{"field": field_id, "value": value, "quote": quote}], "facts": []})
+
+
+def delta(form, field_id, value, quote, *sources, current=None):
+    return parse_delta(form, current or {}, op(field_id, value, quote), evidence_sources=sources)
+
+
+# British and American spellings -------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("field_id,value,text", [
+    ("restaurant_area", "centre", "A: somewhere in the center of the city"),
+    ("hotel_area", "centre", "A: a hotel near the city center please"),
+    ("attraction_type", "theatre", "A: is there a theater I could visit"),
+    ("attraction_area", "centre", "A: something in the centre"),
+])
+def test_spelling_variants_ground(form, field_id, value, text):
+    quote = text.removeprefix("A: ")
+    assert delta(form, field_id, value, quote, text) == {field_id: value}
+
+
+def test_spelling_variant_needs_the_word(form):
+    assert delta(form, "restaurant_area", "centre", "in the city", "A: somewhere in the city") == {}
+
+
+# Group sizes --------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("field_id,quote,value", [
+    ("restaurant_people", "myself and five other people", 6),
+    ("hotel_people", "me and two others", 3),
+    ("train_people", "myself plus 3 more", 4),
+    ("restaurant_people", "for me and one other person", 2),
+])
+def test_caller_counts_in_group(form, field_id, quote, value):
+    assert delta(form, field_id, value, quote, f"A: {quote}") == {field_id: value}
+
+
+def test_companion_count_is_not_group_size(form):
+    quote = "myself and five other people"
+    assert delta(form, "restaurant_people", 5, quote, f"A: {quote}") == {}
+
+
+def test_plain_group_numbers_still_ground(form):
+    assert delta(form, "restaurant_people", 5, "five of us", "A: there are five of us") == {"restaurant_people": 5}
+    assert delta(form, "restaurant_people", 6, "a table for six", "A: a table for six") == {"restaurant_people": 6}
+
+
+# Relative days ------------------------------------------------------------------------------------------------
+
+SNG1193_DAY = "A: at quarter past 11, today is a thursday or two days from now."
+
+
+def test_reference_day_is_not_booking_day(form):
+    assert delta(form, "restaurant_day", "thursday", "today is a thursday", SNG1193_DAY) == {}
+
+
+def test_offset_from_reference_day(form):
+    quote = "today is a thursday or two days from now"
+    assert delta(form, "restaurant_day", "saturday", quote, SNG1193_DAY) == {"restaurant_day": "saturday"}
+    assert delta(form, "restaurant_day", "friday", quote, SNG1193_DAY) == {}
+
+
+def test_offset_quote_uses_reference_in_window(form):
+    assert delta(form, "restaurant_day", "saturday", "two days from now", SNG1193_DAY) == {
+        "restaurant_day": "saturday"}
+
+
+@pytest.mark.parametrize("text,value", [
+    ("A: it's monday today, I need a room from tomorrow", "tuesday"),
+    ("A: today is friday. we arrive the day after tomorrow", "sunday"),
+    ("A: today's saturday and I want to travel in three days", "tuesday"),
+    ("A: today is sunday, book it for 1 day from now", "monday"),
+])
+def test_synthetic_relative_days(form, text, value):
+    quote = text.removeprefix("A: ")
+    field_id = "hotel_day" if "room" in text or "arrive" in text else "train_day"
+    assert delta(form, field_id, value, quote, text) == {field_id: value}
+
+
+def test_reference_day_without_offset_can_be_the_day(form):
+    text = "A: today is thursday and I'd like a table for tonight"
+    assert delta(form, "restaurant_day", "thursday", "today is thursday", text) == {"restaurant_day": "thursday"}
+
+
+def test_restated_day_still_grounds(form):
+    text = "A: today is thursday, two days from now. B: so on saturday"
+    assert delta(form, "restaurant_day", "saturday", "on saturday", text) == {"restaurant_day": "saturday"}
+    text = "A: today is monday, tomorrow is fine but actually make it monday next week"
+    assert delta(form, "hotel_day", "monday", "make it monday next week", text) == {"hotel_day": "monday"}
+
+
+# Service requests ---------------------------------------------------------------------------------------------
+
+def turn(text, speaker="A"):
+    return Partial(t=1, kind="turn", turn_id="1", text=text, speaker=speaker)
+
+
+@pytest.mark.parametrize("text", [
+    "could you please book a table for myself and five other people.",
+    "I'd like to reserve a table at eight.",
+    "can you get us a table near the river?",
+])
+def test_book_a_table_requests_restaurant(form, text):
+    assert requested_services(form, turn(text), caller="A") == {"restaurant"}
+
+
+@pytest.mark.parametrize("text,speaker", [
+    ("i can book a table for you.", "B"),        # the agent offering
+    ("the room has a table and a desk.", "A"),   # furniture
+    ("i want a table lamp.", "A"),
+])
+def test_table_without_request(form, text, speaker):
+    assert requested_services(form, turn(text, speaker), caller="A") == set()
+
+
+def test_restaurant_service_grounds_on_eating_request(form):
+    text = "A: i'm looking for a place that we can eat indian food"
+    assert delta(form, "services", ["restaurant"], "we can eat indian food", text) == {"services": ["restaurant"]}
+    assert delta(form, "services", ["hotel"], "we can eat indian food", text) == {}
+
+
+def test_name_parts_said_apart_ground(form):
+    text = "A: certainly. so first name is rebecca. my last name is louie."
+    quote = "first name is rebecca. my last name is louie"
+    assert delta(form, "profile_name", "rebecca louie", quote, text) == {"profile_name": "rebecca louie"}
+    assert delta(form, "profile_name", "louie rebecca", quote, text) == {}
+    assert delta(form, "profile_name", "rebecca lothridge", quote, text) == {}
+
+
+# Spelled names ------------------------------------------------------------------------------------------------
+
+def spell(turns, current):
+    tracker, result = SpelledName(), None
+    for speaker, text in turns:
+        result = tracker.observe(speaker, text, current) or result
+    return result or tracker.finish(current)
+
+
+def test_sng1193_spelled_surname():
+    turns = [
+        ("A", "certainly. so first name is rebecca. my last name is louie."),
+        ("B", "okay, alright, thank you may please spell your last name for me."),
+        ("A", "mhm. that's both as l like lima or orange."), ("B", "mhm. yes."), ("A", "she likes to."),
+        ("B", "uh huh."), ("A", "age like hotel. are like rojak."), ("B", "yes."),
+        ("A", "i like india. do you like delta."), ("B", "uh huh."), ("A", "do you like golf."),
+        ("B", "what."), ("A", "he like echo."),
+        ("B", "okay, all right. thank you very much. and so it has been booked for you."),
+    ]
+    assert spell(turns, "rebecca louie") == "rebecca lothridge"
+
+
+@pytest.mark.parametrize("turns,current,expected", [
+    # NATO words with "as in" and "for"
+    ([("B", "could you spell your surname?"), ("A", "k as in kilo, a as in alpha, h as in hotel, n as in november"),
+      ("B", "thank you, and your phone number?")], "james con", "james kahn"),
+    # Plain letters
+    ([("B", "can you spell the last name"), ("A", "sure, p e r e z"), ("B", "great, that is booked")],
+     "maria peres", "maria perez"),
+    # A first name being spelled
+    ([("B", "how do you spell your first name"), ("A", "s for sierra e for echo a for alpha n for november"),
+      ("B", "thanks, booking that now")], "shawn lee", "sean lee"),
+])
+def test_synthetic_spellings(turns, current, expected):
+    assert spell(turns, current) == expected
+
+
+def test_spelling_that_confirms_name_changes_nothing():
+    # MUL2873: a garbled spelling of "edward smith" must not replace the correct name.
+    turns = [
+        ("B", "edward smith. may you please spell it for me."),
+        ("A", ("okay, my first name is paul is e dw ard. iceland name is ff for sierra m for mike l. for india, "
+               "t for tango h for.")),
+        ("B", "okay, thank you. would you like an email order."),
+    ]
+    assert spell(turns, "edward smith") is None
+
+
+def test_spelling_checked_against_heard_name_when_form_is_empty():
+    # Same call with the model silent: the caller's own "my full name is edward smith" is the reference.
+    turns = [
+        ("A", "hi, this is edward speaking."), ("A", "certainly my full name is edward smith."),
+        ("B", "edward smith. may you please spell it for me."),
+        ("A", ("my first name is paul is e dw ard. iceland name is ff for sierra m for mike l. for india, "
+               "t for tango h for.")),
+        ("B", "okay, thank you. would you like an email order."),
+    ]
+    assert spell(turns, None) is None
+
+
+def test_spelled_surname_with_model_silent():
+    turns = [
+        ("A", "first name is rebecca. my last name is louie."), ("B", "please spell your last name"),
+        ("A", "l like lima, o like oscar, t like tango, h like hotel"), ("B", "thank you, that is booked"),
+    ]
+    assert spell(turns, None) == "rebecca loth"
+
+
+def test_spelling_that_drops_letters_keeps_name():
+    # Known limit: "jon" fits inside "john", so it reads as a partial confirmation.
+    turns = [("B", "how do you spell your first name"), ("A", "j for juliet o for oscar n for november"),
+             ("B", "thanks")]
+    assert spell(turns, "john lee") is None
+
+
+def test_no_spelling_without_request():
+    assert spell([("A", "i like india. do you like delta."), ("B", "sure, booked.")], "ann lee") is None
+
+
+def test_too_few_letters_publish_nothing():
+    turns = [("B", "please spell your last name"), ("A", "l like lima"), ("B", "sorry, the line is bad")]
+    assert spell(turns, "rebecca louie") is None

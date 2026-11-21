@@ -11,6 +11,7 @@ from strategies.delta import DeltaError, make_messages, parse_delta
 from strategies.gate import Gate, has_content
 from strategies.openrouter import Completion, OpenRouterClient
 from strategies.services import requested_services
+from strategies.spelling import SpelledName
 
 _TRANSCRIPT_CHARS = 2600
 _RECENT_CHARS = 650
@@ -125,6 +126,16 @@ class MyExtractor(Extractor):
         ended = False
         current: dict[str, Any] = {}
         services_seen: dict[str, set[str]] = {}
+        # Fields set from a spelled dictation. A model reply cannot overwrite them with the misheard form.
+        locked: set[str] = set()
+        spelling = (SpelledName(caller="A") if any(spec.field_id == "profile_name" for spec in session.form.fields)
+                    else None)
+
+        def publish_spelling(name: str | None) -> None:
+            if name and name != current.get("profile_name"):
+                session.update("profile_name", name)
+                current["profile_name"] = name
+                locked.add("profile_name")
 
         async def listen() -> None:
             nonlocal active, partial_since, ended
@@ -149,7 +160,12 @@ class MyExtractor(Extractor):
                         value = [option for option in session.form.field("services").options if option in selected]
                         session.update("services", value)
                         current["services"] = value
+                if spelling is not None and message.kind == "turn":
+                    for speaker, text in message.pieces():
+                        publish_spelling(spelling.observe(speaker, text, current.get("profile_name")))
                 changed.set()
+            if spelling is not None:
+                publish_spelling(spelling.finish(current.get("profile_name")))
             ended = True
             changed.set()
 
@@ -204,7 +220,7 @@ class MyExtractor(Extractor):
                         )
                         # Local service detection can publish a newer value while the model is answering.
                         delta = {field: value for field, value in delta.items()
-                                 if current.get(field) == state_at_request.get(field)}
+                                 if current.get(field) == state_at_request.get(field) and field not in locked}
                         diagnostics["accepted"] = len(delta)
                     except DeltaError as exc:
                         error = exc.code
