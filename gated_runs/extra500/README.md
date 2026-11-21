@@ -20,3 +20,11 @@ LFE_CONFIG=gated_runs/extra500/config.yaml LFE_OPENROUTER_ENABLE_PAID=1 LFE_OPEN
 LFE_CONFIG=gated_runs/extra500/config.yaml uv run --locked lfe evaluate gated_runs/extra500/run_folders/* \
   --out gated_runs/extra500/scores
 ```
+
+## Results so far
+
+| Run folder | Calls | Score | Final F1 | € per form | € per audio minute |
+|---|---|---|---|---|---|
+| `run_folders/20261121-204532-c-first100-spokenwoz` (version C, 8 at a time) | first 100 | 0.761 | 76.9% | 0.0050 | 0.0022 |
+
+Scored tables are in `scores/`. The other 400 calls have not been run yet.
