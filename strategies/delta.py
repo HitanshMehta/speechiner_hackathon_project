@@ -454,6 +454,43 @@ _INFO_REQUEST = re.compile(
 _SEGMENT = re.compile(r"(?<!\w)([A-Z]|PENDING):\s*")
 
 
+_CALLER_CONFIRMS = re.compile(r"^(?:uh |um |oh )*(?:yes|yeah|yep|correct|right|that s right|that s correct|exactly)\b")
+
+
+def _segments(raw_sources: Sequence[str]) -> list[tuple[str | None, str]]:
+    # The extractor passes (new turns, unfinished turn, recent turns); recent turns come first in time.
+    segments: list[tuple[str | None, str]] = []
+    for raw in [*raw_sources[2:], *raw_sources[:2]]:
+        if not raw:
+            continue
+        parts = _SEGMENT.split(raw)
+        if parts[0].strip():
+            segments.append((None, parts[0]))
+        segments += list(zip(parts[1::2], parts[2::2]))
+    return segments
+
+
+def _agent_only_unconfirmed(words: str, raw_sources: Sequence[str], caller: str = "A") -> bool:
+    """The quote is only in agent speech that the caller did not confirm with a yes.
+
+    "Arrive by 9 45" from the caller, then the agent's "9 17 a. m.": the agent's train time does not replace the
+    caller's constraint. A read-back the caller confirms ("cambridge to london, is that correct" "yes") can.
+    """
+    segments = _segments(raw_sources)
+    found = False
+    for index, (speaker, text) in enumerate(segments):
+        plain = _words(text)
+        if not _contains(plain, words) and not _near_quote(plain, words):
+            continue
+        if speaker != "B":
+            return False
+        after = next((_words(t) for s, t in segments[index + 1:] if s == caller), "")
+        if _CALLER_CONFIRMS.match(after):
+            return False
+        found = True
+    return found
+
+
 def _agent_info_only(words: str, raw_sources: Sequence[str], caller: str = "A") -> bool:
     """The quote is only in an agent answer to the caller's request for information.
 
@@ -709,6 +746,11 @@ def parse_delta(
             if (not meeting and value is not None and spec.type in (FieldType.select, FieldType.text)
                     and not field_id.startswith("profile_") and _agent_info_only(words, evidence_sources)):
                 drop(op, "agent_information")
+                continue
+            if (not meeting and value is not None and previous is not None and field_id != "services"
+                    and spec.type in (FieldType.select, FieldType.time, FieldType.integer, FieldType.slider)
+                    and not field_id.startswith("profile_") and _agent_only_unconfirmed(words, evidence_sources)):
+                drop(op, "agent_overwrite")
                 continue
             if (spec.type == FieldType.time and value is not None and "caller wants" in spec.prompt.casefold()
                     and _timetable_only(value, evidence_sources)):

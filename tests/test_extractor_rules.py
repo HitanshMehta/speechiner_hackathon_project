@@ -573,3 +573,27 @@ def test_partial_digits_show_early():
     assert dictation.observe("A", "it's 0 7 7", partial=True) == ("profile_phone", "077")
     assert dictation.observe("A", "it's 0 7 7 1") == ("profile_phone", "0771")
     assert dictation.claims("profile_phone", "0771")  # still dictating: the model waits
+
+
+# Agent speech does not replace a caller's value -----------------------------------------------------------------
+
+def test_agent_train_time_does_not_replace_caller_constraint(form):
+    sources = ("B: 9 17 a. m.", "", "A: anything that would arrive in london by 9 45 a m would be suitable.")
+    current = {"train_arrive_by": "09:45"}
+    assert delta(form, "train_arrive_by", "09:17", "9 17 a. m.", *sources, current=current) == {}
+    assert delta(form, "train_arrive_by", "09:17", "9 17 a. m.", *sources) == {"train_arrive_by": "09:17"}
+
+
+def test_agent_readback_the_caller_confirms_can_replace(form):
+    sources = ("B: sorry, my bad, cambridge to london liverpool street. is that correct. A: yes, that's right.", "",
+               "A: from london liverpool street to cambridge.")
+    current = {"train_departure": "london liverpool street"}
+    assert delta(form, "train_departure", "cambridge", "cambridge to london liverpool street", *sources,
+                 current=current) == {"train_departure": "cambridge"}
+
+
+def test_caller_correction_still_replaces(form):
+    sources = ("A: actually make it the expensive range.", "", "A: moderate price range")
+    current = {"restaurant_price_range": "moderate"}
+    assert delta(form, "restaurant_price_range", "expensive", "make it the expensive range", *sources,
+                 current=current) == {"restaurant_price_range": "expensive"}
