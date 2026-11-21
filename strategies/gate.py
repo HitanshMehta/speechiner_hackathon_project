@@ -30,7 +30,7 @@ _SMALL_TALK = frozenset({
 # Minimum seconds between booking-form requests. Values count as fast only within 8 s of being said.
 _SLOT_SPACING_S = 1.0
 # Meeting notes: answers count as fast within 80 s, so batch, but not so long that facts arrive late.
-_MEETING_SPACING_S = 8.0
+_MEETING_SPACING_S = 14.0
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ class Gate:
                 return Schedule("meeting_signal", due)
             if informative >= 26:
                 return Schedule("meeting_batch", due)
-            return Schedule("meeting_deadline", max(due, first_at + 14))
+            return Schedule("meeting_deadline", max(due, first_at + 22))
 
         due = last_call + _SLOT_SPACING_S
         has_option = self._has_option(lowered, tokens)
