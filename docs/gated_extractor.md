@@ -95,15 +95,16 @@ can still bill at OpenRouter, but `max_tokens` and `max_price` bound it by the r
 a provider-side key limit at the team's $20 ceiling for cumulative enforcement.
 
 After live testing is authorized, start with `SNG0877`, the shortest bundled conversation at about 60 seconds.
-The rates below were verified against OpenRouter's standard Gemini 2.5 Flash-Lite route. Set
-`LFE_OPENROUTER_EUR_PER_USD` to the exchange rate used for the comparison before running the command.
+The rates below are OpenRouter's standard Gemini 2.5 Flash route, the model every reported run used. Set
+`LFE_OPENROUTER_EUR_PER_USD` to the exchange rate used for the comparison (0.86 in our reports) before running.
 
 ```bash
 export UV_CACHE_DIR=/workspace/.cache/uv
-export LFE_OPENROUTER_INPUT_USD_PER_M=0.10
-export LFE_OPENROUTER_OUTPUT_USD_PER_M=0.40
-export LFE_OPENROUTER_CACHE_READ_USD_PER_M=0.01
+export LFE_OPENROUTER_INPUT_USD_PER_M=0.30
+export LFE_OPENROUTER_OUTPUT_USD_PER_M=2.50
+export LFE_OPENROUTER_CACHE_READ_USD_PER_M=0.03
 export LFE_OPENROUTER_CACHE_WRITE_USD_PER_M=0.0833333333333333
+export LFE_OPENROUTER_EUR_PER_USD=0.86
 LFE_OPENROUTER_ENABLE_PAID=1 LFE_OPENROUTER_RUN_BUDGET_USD=0.05 \
   uv run --locked lfe run my_extractor:MyExtractor --dataset spokenwoz --ids SNG0877 --name gated-pilot
 ```
