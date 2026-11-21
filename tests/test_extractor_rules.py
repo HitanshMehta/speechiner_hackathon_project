@@ -483,3 +483,66 @@ def test_agent_proposal_after_caller_constraints_stays(form):
             "B: let me see the sense of the city that would be the golden curry.")
     assert delta(form, "restaurant_name", "golden curry", "the golden curry", text) == {
         "restaurant_name": "golden curry"}
+
+
+# Dictated numbers ---------------------------------------------------------------------------------------------
+
+from strategies.dictation import DigitDictation  # noqa: E402
+
+_NUMBERS = {"profile_phone", "profile_id_number"}
+
+
+def _dictate(turns):
+    dictation = DigitDictation(_NUMBERS)
+    shown = {}
+    for speaker, text in turns:
+        if found := dictation.observe(speaker, text):
+            shown[found[0]] = found[1]
+    return dictation, shown
+
+
+def test_id_dictated_in_groups_with_agent_echo():
+    _, shown = _dictate([
+        ("B", "okay, i'll be happy to do that. may i please have your id number."),
+        ("A", "sure, my id number is 0, 2, 3, 8."), ("B", "yeah."), ("A", "9 2 2 1. 0, 3, 2, 8."),
+        ("B", "92210328."), ("A", "2, 4, 8, 8."),
+        ("B", "okay, thank you very much. train booking for two has been made and your train id is tr8104."),
+    ])
+    assert shown == {"profile_id_number": "0238922103282488"}
+
+
+def test_ask_in_a_turn_that_also_gives_prices():
+    _, shown = _dictate([
+        ("B", "so the train id for that will be tr4890. and there'll be 13, £28 per person. could i get your id "
+              "number to make the booking, please."),
+        ("A", "yeah, it's 0, 3, 0, 3."), ("B", "okay."), ("A", "7 8 2 3."),
+    ])
+    assert shown == {"profile_id_number": "03037823"}
+
+
+def test_caller_announces_phone_with_double():
+    dictation, shown = _dictate([
+        ("B", "all right, ma'am, she says it's telephone number."),
+        ("A", "my telephone number is 2 4 3 7 4 7. uh, double 1 7 8."),
+        ("B", "okay, just to confirm, they said the cellphone number is 2437471178. is that correct."),
+        ("A", "yes, that is correct."), ("B", "so is there anything else i should like me to assist you."),
+    ])
+    assert shown == {"profile_phone": "2437471178"}
+    assert dictation.claims("profile_id_number", "1178") and not dictation.claims("profile_id_number", "5550")
+
+
+def test_agent_giving_a_number_is_not_a_dictation():
+    _, shown = _dictate([
+        ("A", "can i have the postal code and phone number."),
+        ("B", "sure. so the postal code is cb23ht. and the phone number is 1223324600."),
+        ("A", "okay, thank you."),
+    ])
+    assert shown == {}
+
+
+def test_partial_digits_show_early():
+    dictation = DigitDictation(_NUMBERS)
+    dictation.observe("B", "could i have your phone number please")
+    assert dictation.observe("A", "it's 0 7 7", partial=True) == ("profile_phone", "077")
+    assert dictation.observe("A", "it's 0 7 7 1") == ("profile_phone", "0771")
+    assert dictation.claims("profile_phone", "0771")  # still dictating: the model waits

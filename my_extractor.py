@@ -11,6 +11,7 @@ from strategies.delta import DeltaError, make_messages, parse_delta
 from strategies.gate import Gate, has_content
 from strategies.openrouter import Completion, OpenRouterClient
 from strategies.services import requested_services
+from strategies.dictation import DigitDictation
 from strategies.spelling import SpelledName
 
 _TRANSCRIPT_CHARS = 2600
@@ -126,10 +127,20 @@ class MyExtractor(Extractor):
         ended = False
         current: dict[str, Any] = {}
         services_seen: dict[str, set[str]] = {}
-        # Fields set from a spelled dictation. A model reply cannot overwrite them with the misheard form.
+        # Fields set from a spelled name or dictated digits. A model reply cannot overwrite them.
         locked: set[str] = set()
         spelling = (SpelledName(caller="A") if any(spec.field_id == "profile_name" for spec in session.form.fields)
                     else None)
+
+        number_fields = {spec.field_id for spec in session.form.fields
+                         if spec.field_id in ("profile_phone", "profile_id_number")}
+        dictation = DigitDictation(number_fields, caller="A") if number_fields else None
+
+        def publish_digits(found: tuple[str, str] | None) -> None:
+            if found is not None and found[1] != current.get(found[0]):
+                session.update(found[0], found[1])
+                current[found[0]] = found[1]
+                locked.add(found[0])
 
         def publish_spelling(name: str | None) -> None:
             if name and name != current.get("profile_name"):
@@ -160,6 +171,12 @@ class MyExtractor(Extractor):
                         value = [option for option in session.form.field("services").options if option in selected]
                         session.update("services", value)
                         current["services"] = value
+                if dictation is not None:
+                    if message.kind == "turn":
+                        for speaker, text in message.pieces():
+                            publish_digits(dictation.observe(speaker, text))
+                    else:
+                        publish_digits(dictation.observe(message.speaker, message.text, partial=True))
                 if spelling is not None and message.kind == "turn":
                     for speaker, text in message.pieces():
                         publish_spelling(spelling.observe(speaker, text, current.get("profile_name")))
@@ -224,7 +241,8 @@ class MyExtractor(Extractor):
                         )
                         # Local service detection can publish a newer value while the model is answering.
                         delta = {field: value for field, value in delta.items()
-                                 if current.get(field) == state_at_request.get(field) and field not in locked}
+                                 if current.get(field) == state_at_request.get(field) and field not in locked
+                                 and not (dictation is not None and dictation.claims(field, value))}
                         diagnostics["accepted"] = len(delta)
                     except DeltaError as exc:
                         error = exc.code
