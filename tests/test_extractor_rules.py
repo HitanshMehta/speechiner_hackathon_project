@@ -597,3 +597,14 @@ def test_caller_correction_still_replaces(form):
     current = {"restaurant_price_range": "moderate"}
     assert delta(form, "restaurant_price_range", "expensive", "make it the expensive range", *sources,
                  current=current) == {"restaurant_price_range": "expensive"}
+
+
+def test_system_prompt_is_sent_with_a_cache_breakpoint(monkeypatch):
+    from strategies import openrouter
+
+    messages = [{"role": "system", "content": "rules"}, {"role": "user", "content": "{}"}]
+    cached = openrouter._cacheable(messages)
+    assert cached[0]["content"] == [{"type": "text", "text": "rules", "cache_control": {"type": "ephemeral"}}]
+    assert cached[1] == messages[1] and messages[0]["content"] == "rules"  # the caller's list is unchanged
+    monkeypatch.setenv("LFE_OPENROUTER_EXPLICIT_CACHE", "0")
+    assert openrouter._cacheable(messages) == messages

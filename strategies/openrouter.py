@@ -98,6 +98,22 @@ class _RequestFailed(Exception):
     http_status: int | None = None
 
 
+def _cacheable(messages: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Mark the end of the stable system prompt as a cache breakpoint.
+
+    Gemini's implicit cache covered about 1,630 of the prompt's 2,010 tokens and missed now and then. An explicit
+    breakpoint caches the whole system prompt (about 1,970 tokens, read at a tenth of the input price), so only the
+    short evidence message is billed at the full rate. The first request of a prompt pays one cache write.
+    """
+    if os.environ.get(ENV_PREFIX + "EXPLICIT_CACHE", "1") == "0" or not messages:
+        return list(messages)
+    first, *rest = messages
+    if first.get("role") != "system" or not isinstance(first.get("content"), str):
+        return list(messages)
+    block = {"type": "text", "text": first["content"], "cache_control": {"type": "ephemeral"}}
+    return [{"role": "system", "content": [block]}, *rest]
+
+
 class OpenRouterClient:
     """One instance shares a local budget among all conversations of a run."""
 
@@ -186,7 +202,7 @@ class OpenRouterClient:
     def _request(self, messages: list[dict[str, str]], max_tokens: int) -> dict[str, Any]:
         body = {
             "model": self.model,
-            "messages": messages,
+            "messages": _cacheable(messages),
             "temperature": 0,
             "max_tokens": max_tokens,
             "response_format": RESPONSE_FORMAT,
