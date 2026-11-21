@@ -150,6 +150,33 @@ def test_table_without_request(form, text, speaker):
     assert requested_services(form, turn(text, speaker), caller="A") == set()
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("uh, looking for train to london, liverpool.", {"train"}),
+    ("perfect. i'm looking for a place to stay in the center of cambridge.", {"hotel"}),
+    ("we need somewhere to stay for two nights.", {"hotel"}),
+    ("is there a place to stay near the station?", set()),   # a question
+    ("i'm looking forward to it.", set()),
+])
+def test_service_requests_without_a_subject_or_the_word(form, text, expected):
+    assert requested_services(form, turn(text), caller="A") == expected
+
+
+# Recognizer misspellings of an option -------------------------------------------------------------------------
+
+def test_misheard_option_grounds_when_one_option_is_close(form):
+    text = "A: uh, it should depart from kingsland and it should, um. head to cambridge."
+    assert delta(form, "train_departure", "kings lynn", "depart from kingsland", text) == {
+        "train_departure": "kings lynn"}
+    assert delta(form, "train_departure", "ely", "depart from kingsland", text) == {}
+
+
+def test_short_or_distant_options_are_not_guessed(form):
+    text = "A: something in the yeast please"
+    assert delta(form, "restaurant_area", "east", "something in the yeast", text) == {}
+    text = "A: in the exclusive price range"
+    assert delta(form, "restaurant_price_range", "expensive", "exclusive price range", text) == {}
+
+
 def test_restaurant_service_grounds_on_eating_request(form):
     text = "A: i'm looking for a place that we can eat indian food"
     assert delta(form, "services", ["restaurant"], "we can eat indian food", text) == {"services": ["restaurant"]}

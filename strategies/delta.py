@@ -7,6 +7,7 @@ import math
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
+from difflib import SequenceMatcher
 from typing import Any
 
 from live_form_eval import FieldSpec, FieldType, Form
@@ -517,6 +518,28 @@ def _digits_field(spec: FieldSpec) -> bool:
     return spec.type == FieldType.phone or (spec.type == FieldType.text and "digits only" in spec.prompt.casefold())
 
 
+_FUZZY_RATIO = 0.75
+_FUZZY_MARGIN = 0.08
+
+
+def _closest_option(spec: FieldSpec, words: str) -> str | None:
+    """The option a misrecognized phrase in the quote stands for, when exactly one option is that close."""
+    tokens = words.split()
+    scores: list[tuple[float, str]] = []
+    for option in spec.options:
+        target = "".join(_words(option).split())
+        size = len(option.split())
+        if len(target) < 6:
+            continue
+        best = max((SequenceMatcher(None, "".join(tokens[i:i + n]), target).ratio()
+                    for n in {size - 1, size, size + 1} - {0} for i in range(max(0, len(tokens) - n + 1))), default=0.0)
+        scores.append((best, option))
+    scores.sort(reverse=True)
+    if not scores or scores[0][0] < _FUZZY_RATIO or (len(scores) > 1 and scores[0][0] - scores[1][0] < _FUZZY_MARGIN):
+        return None
+    return scores[0][1]
+
+
 def _option_prefix(spec: FieldSpec, value: str, words: str) -> bool:
     """A long option named by its first two words, when no other option starts with them ("london liverpool")."""
     parts = value.casefold().split()
@@ -551,6 +574,8 @@ def _ground_value(spec: FieldSpec, value: Any, quote: str, words: str) -> bool:
         return True
     if _option_prefix(spec, value, words):
         return True
+    if spec.type == FieldType.select and _closest_option(spec, words) == value:
+        return True  # "depart from kingsland": the recognizer's spelling of the one option it resembles.
     if spec.type == FieldType.select and (other := _OPPOSITE.get(value.casefold())):
         # "the opposite side of the north" names the south.
         if re.search(rf"\bopposite\b(?: \w+){{0,5}}? {other}\b", words):

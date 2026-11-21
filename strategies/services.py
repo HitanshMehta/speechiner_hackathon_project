@@ -13,7 +13,7 @@ _HANDOFF = re.compile(
 )
 _REQUEST = re.compile(
     r"^(?:(?:hello|hi|yes|yeah|okay|ok|oh|well|please|actually|um|uh)[, ]+)*"
-    r"(?:(?:i(?: am|'m)|we(?: are|'re)) (?:looking for|trying to (?:book|find|get|reserve))"
+    r"(?:(?:(?:i(?: am|'m)|we(?: are|'re)) )?looking for|(?:i(?: am|'m)|we(?: are|'re)) trying to (?:book|find|get|reserve)"
     r"|(?:i|we) (?:need|want|would like)(?: to (?:book|find|get|reserve))?"
     r"|(?:i|we)'d like(?: to (?:book|find|get|reserve))?)\s+"
 )
@@ -34,6 +34,11 @@ _TABLE = re.compile(r"\b(?:book|reserve|get|need|want|like) (?:a|us a|me a) tabl
 _EAT = re.compile(
     r"\b(?:looking for|want|need|find)\b[^?]{0,20}\b(?:a place|somewhere)\b[^?]{0,40}?\b(?:to|can|could) "
     r"(?:eat|dine|have (?:dinner|lunch|breakfast))\b(?=[^?]*(?:$|[.!;]))"
+)
+# "i'm looking for a place to stay in the center" asks for a hotel without the word.
+_STAY = re.compile(
+    r"\b(?:looking for|want|need|find)\b[^?]{0,20}\b(?:a place|somewhere)\b (?:to stay|for (?:the|a) night)\b"
+    r"(?=[^?]*(?:$|[.!;]))"
 )
 _NOUNS = {"hotel": re.compile(r"^rooms?\b"), "train": re.compile(r"^tickets?\b")}
 
@@ -126,4 +131,6 @@ def requested_services(form: Form, message: Partial, *, caller: str | None = Non
             services.update(_piece_services(text, options, option_pattern, finished=finished, first_only=False))
             if "restaurant" in options and _EAT.search(text) and not _RETRACTION.search(text):
                 services.add(options["restaurant"])
+            if "hotel" in options and _STAY.search(text) and not _RETRACTION.search(text):
+                services.add(options["hotel"])
     return services
