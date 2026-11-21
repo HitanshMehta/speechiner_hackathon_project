@@ -9,9 +9,9 @@ earlier tuning runs are excluded from this comparison.
 | Run | Folder |
 |---|---|
 | SpokenWOZ baseline | `speechineer/20261117-172722-speechineer-openrouter-gemini-25-flash-extraction-spokenwoz` |
-| SpokenWOZ ours | `runs/20261121-171128-gated-flash-v10-spokenwoz` |
+| SpokenWOZ ours | `gated_runs/official/20261121-171128-gated-flash-v10-spokenwoz` |
 | AMI baseline | `speechineer/20261117-183600-speechineer-openrouter-gemini-25-flash-extraction-ami` |
-| AMI ours | `runs/20261121-170950-gated-flash-v5-ami` |
+| AMI ours | `gated_runs/official/20261121-170950-gated-flash-v5-ami` |
 
 ## Presented version (C, commit `f354c34`)
 
@@ -21,7 +21,7 @@ without the always-empty `facts` array. It also fixes local rules that missed on
 back with "yes, i got that", "i'm also looking for a train", a surname asked for on its own, and "my name is
 called ...".
 
-### Official SpokenWOZ bench (6 calls, run `runs/20261121-183941-gated-flash-v14b-repeat-spokenwoz`)
+### Official SpokenWOZ bench (6 calls, run `gated_runs/official/20261121-183941-gated-flash-v14b-repeat-spokenwoz`)
 
 | Metric | Saved Speechineer | Version C |
 |---|---|---|
