@@ -617,6 +617,13 @@ def _option_prefix(spec: FieldSpec, value: str, words: str) -> bool:
     return len(sharing) == 1 and _contains(words, prefix)
 
 
+# Words that are never part of a caller's name, though they follow "my name is" or come before it.
+_NOT_A_NAME = frozenset({
+    "okay", "ok", "yes", "yeah", "hello", "hi", "uh", "um", "sure", "thanks", "thank", "please", "sorry",
+    "spell", "spells", "spelled", "spelt", "spelling", "like", "name", "is", "my", "calling", "speaking", "called",
+})
+
+
 def _ground_value(spec: FieldSpec, value: Any, quote: str, words: str) -> bool:
     if value is None:
         return bool(_WITHDRAWAL.search(words))
@@ -633,6 +640,8 @@ def _ground_value(spec: FieldSpec, value: Any, quote: str, words: str) -> bool:
         return _contains(words, _words(value)) or _contains(words, _words(spoken))
     if not isinstance(value, str):
         return False
+    if spec.field_id == "profile_name" and _NOT_A_NAME.intersection(_words(value).split()):
+        return False  # "okay" from "okay, my name is", or "herald spells" from "herald spells h a r".
     if spec.field_id == "services" and (cue := _SERVICE_CUES.get(value)) and cue.search(words):
         return True
     if spec.type == FieldType.select and (number := _number(value)) is not None and math.isfinite(number):

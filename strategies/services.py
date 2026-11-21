@@ -13,11 +13,12 @@ _HANDOFF = re.compile(
 )
 _REQUEST = re.compile(
     r"^(?:(?:hello|hi|yes|yeah|okay|ok|oh|well|please|actually|um|uh)[, ]+)*"
-    r"(?:(?:(?:i(?: am|'m)|we(?: are|'re)) )?looking for|(?:i(?: am|'m)|we(?: are|'re)) trying to (?:book|find|get|reserve)"
-    r"|(?:i|we) (?:need|want|would like)(?: to (?:book|find|get|reserve))?"
+    r"(?:(?:(?:i(?: am|'m)|we(?: are|'re)) )?(?:also |just )?looking for|(?:i(?: am|'m)|we(?: are|'re)) trying to (?:book|find|get|reserve)"
+    r"|(?:i|we) (?:also )?(?:need|want|would like)(?: to (?:book|find|get|reserve))?"
     r"|(?:i|we)'d like(?: to (?:book|find|get|reserve))?)\s+"
 )
-_DETERMINER = re.compile(r"^(?:a|an|the)\s+")
+# "a particular hotel", "a good restaurant": one plain adjective may come before the service.
+_DETERMINER = re.compile(r"^(?:a|an|the|some)\s+(?:(?:particular|good|nice|certain|new|specific)\s+)?")
 _LINK = re.compile(r"^\s*,?\s*and\s+")
 _QUALIFIER = re.compile(
     r"^(?:to|from|in|at|for|on|with|without|near|around|by|under|between|leaving|arriving|please|instead|that)\b"
@@ -40,6 +41,7 @@ _STAY = re.compile(
     r"\b(?:looking for|want|need|find)\b[^?]{0,20}\b(?:a place|somewhere)\b (?:to stay|for (?:the|a) night)\b"
     r"(?=[^?]*(?:$|[.!;]))"
 )
+_ALIASES = {"trend": "train", "cab": "taxi"}
 _NOUNS = {"hotel": re.compile(r"^rooms?\b"), "train": re.compile(r"^tickets?\b")}
 
 
@@ -68,6 +70,8 @@ def _clause_services(
         link = _LINK.match(tail)
         if link is None:
             break
+        if option_pattern.match(_DETERMINER.sub("", tail[link.end() :], count=1)) is None:
+            return services  # "a train and i want to go to cambridge": a new clause follows the request.
         tail = tail[link.end() :]
     # A partial ending in "a train" might yet say "station". A destination or
     # completed clause confirms the sense. Unknown noun compounds go to the model.
@@ -108,6 +112,8 @@ def requested_services(form: Form, message: Partial, *, caller: str | None = Non
     if spec is None or spec.type != FieldType.multiselect or not spec.options:
         return set()
     options = {option.casefold(): option for option in spec.options}
+    # Recognizer and everyday words for a service: "i'm looking for a trend", "i need a cab".
+    options.update({alias: options[target] for alias, target in _ALIASES.items() if target in options})
     literals = sorted(options, key=len, reverse=True)
     option_pattern = re.compile(r"(?:" + "|".join(re.escape(option) for option in literals) + r")(?=$|[\s,])")
     services: set[str] = set()

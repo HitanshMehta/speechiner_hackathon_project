@@ -28,6 +28,7 @@ _FILLER = frozenset({
     "yep", "okay", "ok", "alright", "right", "so", "sorry", "that", "the", "number", "id", "phone", "telephone",
     "cellphone", "mobile", "identification", "a", "b", "got", "correct", "go", "on", "please", "thank", "thanks",
     "you", "just", "to", "confirm", "said", "they", "she", "he", "your", "of",
+    "i", "noted", "continue", "next", "great", "good", "fine", "perfect", "with", "me",
 })
 
 

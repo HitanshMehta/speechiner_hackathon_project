@@ -608,3 +608,64 @@ def test_system_prompt_is_sent_with_a_cache_breakpoint(monkeypatch):
     assert cached[1] == messages[1] and messages[0]["content"] == "rules"  # the caller's list is unchanged
     monkeypatch.setenv("LFE_OPENROUTER_EXPLICIT_CACHE", "0")
     assert openrouter._cacheable(messages) == messages
+
+
+# Found on the extra SpokenWOZ calls -----------------------------------------------------------------------------
+
+@pytest.mark.parametrize("turns,current,expected", [
+    # MUL3774: the agent asks for the surname alone after the first name.
+    ([("B", "no problem. may you please call your name."), ("A", "my name is harold."),
+      ("B", "thank you, your surname."), ("A", "my name is gibson spelled g i b s o n.")], "harold", "harold gibson"),
+    ([("B", "and your last name, please?"), ("A", "okay, it's moreno.")], "lucia", "lucia moreno"),
+    ([("B", "and your last name, please?"), ("A", "yes.")], "lucia", None),          # no name in the answer
+    ([("B", "and your last name, please?"), ("A", "moreno.")], "lucia moreno", None),  # already complete
+    ([("B", "what's your surname?"), ("A", "sorry, can you repeat that")], "lucia", None),
+])
+def test_surname_answer_joins_first_name(turns, current, expected):
+    assert spell(turns, current) == expected
+
+
+def test_spells_is_not_a_surname():
+    tracker = SpelledName()
+    tracker.observe("A", "my name is herald spells h a r o l d.", None)
+    assert tracker.take_stated() is None
+    assert tracker.first_name == "herald"
+
+
+@pytest.mark.parametrize("value", ["okay", "herald spells", "yes"])
+def test_filler_is_not_a_name(form, value):
+    quote = f"okay, my name is {value}"
+    delta = parse_delta(form, {}, op("profile_name", value, quote), evidence_sources=[f"A: {quote} h a r o l d."])
+    assert "profile_name" not in delta
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("uh, yes, i'm also looking for a train and i want to go to cambridge.", {"train"}),
+    ("hi, good. i am looking for a particular hotel by the name of aircon guest.", {"hotel"}),
+    ("mm. i'm looking for a trend.", {"train"}),
+    ("i also need a cab to the station.", {"taxi"}),
+    ("i'm looking for a train and a hotel.", {"train", "hotel"}),
+    ("i'm looking for a train station near the hotel.", set()),
+])
+def test_more_service_phrasings(form, text, expected):
+    assert requested_services(form, turn(text), caller="A") == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("my name is called judith white.", None),        # "called judith" is not a name
+    ("okay, my name is gracious. grace spells like g r a c e.", None),
+    ("hello, my name is mary edwards.", "mary edwards"),
+])
+def test_stated_full_name_needs_one_sentence(text, expected):
+    tracker = SpelledName()
+    tracker.observe("A", text, None)
+    assert tracker.take_stated() == expected
+
+
+def test_agent_i_got_that_keeps_dictation_open():
+    # SNG0853: "yes, i got that." between groups of digits.
+    _, shown = _dictate([
+        ("B", "okay. can i have your phone number."), ("A", "yes, it's 1 6 1."), ("B", "yes, i got that."),
+        ("A", "3, 7, 6."), ("B", "yes, i got that."), ("A", "1 7 2 8."),
+    ])
+    assert shown == {"profile_phone": "1613761728"}
