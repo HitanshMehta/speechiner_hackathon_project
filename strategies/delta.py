@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import math
 import re
 import unicodedata
@@ -146,6 +147,34 @@ def _describe(spec: FieldSpec) -> dict[str, Any]:
     return field
 
 
+_COMPACT_FIELDS = os.environ.get("GATED_COMPACT_FIELDS", "1") != "0"
+
+
+def _fields_text(fields: Sequence[FieldSpec]) -> str:
+    """The field list as one line per field, with option lists that several fields share written once.
+
+    About a third shorter than the JSON list, which matters because every request reads it from the cache.
+    """
+    counts: dict[tuple[str, ...], int] = {}
+    for spec in fields:
+        if spec.options:
+            counts[tuple(spec.options)] = counts.get(tuple(spec.options), 0) + 1
+    shared = {options: f"L{index}" for index, options in enumerate(o for o, n in counts.items() if n > 1)}
+    lines = ["Fields, one per line: id | type | what it holds | options or range."]
+    for spec in fields:
+        parts = [spec.field_id, spec.type.value, spec.prompt or spec.label]
+        if spec.options:
+            options = tuple(spec.options)
+            parts.append(f"options {shared[options]}" if options in shared else "options: " + "; ".join(options))
+        if spec.range:
+            parts.append(f"range {spec.range[0]:g} to {spec.range[1]:g}")
+        lines.append(" | ".join(parts))
+    if shared:
+        lines.append("Shared option lists (use the exact strings):")
+        lines += [f"{name}: " + "; ".join(options) for options, name in shared.items()]
+    return "\n".join(lines)
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -168,7 +197,8 @@ def make_messages(
         instructions.append(_STATION)
     if form.description:
         instructions.append(f"Form rules:\n{form.description}")
-    instructions.append(f"Fields:\n{_json([_describe(spec) for spec in form.fields])}")
+    instructions.append(_fields_text(form.fields) if _COMPACT_FIELDS else
+                        f"Fields:\n{_json([_describe(spec) for spec in form.fields])}")
 
     evidence: dict[str, Any] = {
         "allow_clears": allow_clear,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -16,6 +17,7 @@ from strategies.spelling import SpelledName
 
 _TRANSCRIPT_CHARS = 2600
 _RECENT_CHARS = 650
+_CALLER_ONLY = os.environ.get("GATED_CALLER_ONLY", "0") == "1"
 
 
 class Backend(Protocol):
@@ -36,6 +38,7 @@ class Batch:
     first_at: float
     finished: bool
     more: bool
+    caller_spoke: bool = True  # the new evidence holds caller speech (or a speaker not yet known)
 
 
 def _unseen(message: Partial, reviewed: Partial | None) -> str:
@@ -67,6 +70,7 @@ def _batch(
     lines: list[str] = []
     evidence: list[tuple[float, str]] = []
     end, size = cursor, 0
+    caller_spoke = False
     while end < len(turns):
         turn = turns[end]
         line = turn.labelled_text()
@@ -79,6 +83,7 @@ def _batch(
             lines.append(line)
             evidence.append((turn.t, new_text))
             size += len(line) + 1
+            caller_spoke = caller_spoke or any(speaker != "B" and has_content(text) for speaker, text in turn.pieces())
         end += 1
     has_finished_evidence = any(has_content(text) for _, text in evidence)
     active = None
@@ -92,9 +97,10 @@ def _batch(
             if reviewed and partial.turn_id == reviewed.turn_id:
                 first_partial = max(first_partial, reviewed.t)
             evidence.append((first_partial, new_text))
+            caller_spoke = caller_spoke or (partial.speaker != "B" and has_content(new_text))
     first_at = next((t for t, text in evidence if has_content(text)), evidence[0][0] if evidence else float("inf"))
     return Batch(end, "\n".join(lines), _recent(turns, cursor), active, "\n".join(text for _, text in evidence), first_at,
-                 has_finished_evidence, more)
+                 has_finished_evidence, more, caller_spoke)
 
 
 async def _wait_for_evidence(changed: asyncio.Event, session: Session, deadline: float | None) -> None:
@@ -209,6 +215,10 @@ class MyExtractor(Extractor):
                 if schedule is None or batch == failed:
                     if ended:
                         return
+                    await _wait_for_evidence(changed, session, None)
+                    continue
+                if _CALLER_ONLY and not batch.caller_spoke and not ended and not gate.meeting:
+                    # Agent speech alone waits for the caller's next words, which carry it as context.
                     await _wait_for_evidence(changed, session, None)
                     continue
                 if schedule.due > session.now():
