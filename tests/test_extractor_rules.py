@@ -49,6 +49,7 @@ def test_spelling_variant_needs_the_word(form):
     ("hotel_people", "me and two others", 3),
     ("train_people", "myself plus 3 more", 4),
     ("restaurant_people", "for me and one other person", 2),
+    ("restaurant_people", "myself and five", 6),   # a quote cut before "others"
 ])
 def test_caller_counts_in_group(form, field_id, quote, value):
     assert delta(form, field_id, value, quote, f"A: {quote}") == {field_id: value}
@@ -118,6 +119,8 @@ def turn(text, speaker="A"):
     "could you please book a table for myself and five other people.",
     "I'd like to reserve a table at eight.",
     "can you get us a table near the river?",
+    "i'm looking for a place that we can eat indian food in the city.",
+    "we need somewhere to have dinner tonight.",
 ])
 def test_book_a_table_requests_restaurant(form, text):
     assert requested_services(form, turn(text), caller="A") == {"restaurant"}
@@ -127,6 +130,7 @@ def test_book_a_table_requests_restaurant(form, text):
     ("i can book a table for you.", "B"),        # the agent offering
     ("the room has a table and a desk.", "A"),   # furniture
     ("i want a table lamp.", "A"),
+    ("is there a place to eat near the hotel?", "A"),   # a question, not a request
 ])
 def test_table_without_request(form, text, speaker):
     assert requested_services(form, turn(text, speaker), caller="A") == set()
@@ -228,3 +232,33 @@ def test_no_spelling_without_request():
 def test_too_few_letters_publish_nothing():
     turns = [("B", "please spell your last name"), ("A", "l like lima"), ("B", "sorry, the line is bad")]
     assert spell(turns, "rebecca louie") is None
+
+
+def test_spelling_variant_value_normalizes_to_option(form):
+    text = "A: in the center of the city"
+    assert delta(form, "restaurant_area", "center", "center of the city", text) == {"restaurant_area": "centre"}
+
+
+def test_dropped_proposals_are_logged(form):
+    diagnostics = {}
+    parse_delta(form, {}, op("restaurant_time", "11:15", "at noon"), evidence_sources=("A: at noon",),
+                diagnostics=diagnostics)
+    assert diagnostics["dropped"][0]["reason"] == "value_not_in_quote"
+
+
+def test_unmarked_hour_is_shown_as_said(form):
+    text = "A: at quarter past 11, today is a thursday"
+    assert delta(form, "restaurant_time", "23:15", "quarter past 11", text) == {"restaurant_time": "11:15"}
+    text = "A: at quarter past 11 at night"
+    assert delta(form, "restaurant_time", "23:15", "quarter past 11 at night", text) == {"restaurant_time": "23:15"}
+    assert delta(form, "restaurant_time", "11:15", "quarter past 11 at night", text) == {"restaurant_time": "23:15"}
+    text = "A: at 7 pm please"
+    assert delta(form, "restaurant_time", "19:00", "at 7 pm", text) == {"restaurant_time": "19:00"}
+    assert delta(form, "restaurant_time", "07:00", "at 7 pm", text) == {"restaurant_time": "19:00"}
+
+
+def test_gate_sees_spelling_variant_as_option(form):
+    from strategies.gate import Gate
+    schedule = Gate(form).schedule("in the center of the city", recent="", first_at=10, last_call=0,
+                                   finished=False, final=False)
+    assert schedule is not None and schedule.reason == "slot_signal"

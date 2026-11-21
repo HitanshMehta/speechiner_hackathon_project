@@ -51,7 +51,8 @@ For a booking, timetable and service information from an agent are not caller co
 information does not accept a new form value. Look for a caller's request or explicit acceptance of that value.
 Resolve a relative day from the reference the conversation states: in "today is thursday, two days from now" the
 booking day is saturday, not thursday. Count the caller in a group: "myself and five others" is 6 people. Quote the
-words holding the reference and the offset, or the companions.
+words holding the reference and the offset, or the companions. Map a spelling variant to the listed option
+("center" is "centre") and quote the transcript's spelling.
 
 Return JSON with both arrays, like {"set":[{"field":"<field ID>","value":"<new value>","quote":"<exact transcript>"}],"facts":[]}.
 Submit only changed fields. Each quote must be a short, contiguous transcript excerpt that explicitly establishes the
@@ -93,7 +94,7 @@ _DIGITAL_TIME = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
 _RELATIVE_TIME = re.compile(rf"\b(quarter|half|{_CARDINAL}) (past|after|to|before) ({_CARDINAL})\b")
 _SPOKEN_TIME = re.compile(rf"\b({_CARDINAL}) ((?:oh |zero )?(?:{_CARDINAL}))\b")
 _AT_HOUR = re.compile(rf"\b(?:at|by|before|after|around) ({_CARDINAL})\b")
-_HOUR_SUFFIX = re.compile(rf"\b({_CARDINAL}) (?=o clock\b|[ap] ?m\b|in the (?:morning|afternoon|evening)\b)")
+_HOUR_SUFFIX = re.compile(rf"\b({_CARDINAL}) (?=o clock\b|[ap] ?m\b|in the (?:morning|afternoon|evening)\b|at night\b|tonight\b)")
 _TIMETABLE = re.compile(
     r"\b(?:(?:arrival|departure) time (?:is|will be|would be)|"
     r"(?:train|bus|flight|ferry|service) (?:departs|leaves|arrives) (?:at|around)|"
@@ -103,7 +104,7 @@ _REQUEST_TIME = re.compile(r"\b(?:i|we) (?:(?:would |d )?like|want|need|prefer|m
 # British and American spellings of the same option word. Both sides of a comparison are normalized.
 _SPELLING = {"center": "centre", "centers": "centres", "theater": "theatre", "theaters": "theatres"}
 _COMPANIONS = re.compile(
-    rf"\b(?:myself|me) (?:and|plus|with) ({_CARDINAL}) (?:other|others|more|friends|guests|people|colleagues)\b"
+    rf"\b(?:myself|me) (?:and|plus|with) ({_CARDINAL})(?: (?:other|others|more|friends|guests|people|colleagues)\b|$)"
 )
 _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _DAY = "|".join(_WEEKDAYS)
@@ -196,6 +197,7 @@ def _option(spec: FieldSpec, value: Any) -> Any:
     if not isinstance(value, str) or value in spec.options:
         return value
     word = value.strip().casefold()
+    word = _SPELLING.get(word, word)
     matches = [option for option in spec.options if option.casefold() == word]
     return matches[0] if len(matches) == 1 else _station_option(spec, word) or value
 
@@ -300,7 +302,7 @@ def _clock(hour: float | None, minute: float | None, suffix: str, offset: int = 
     if 1 <= hour <= 12:
         if re.match(r"(?:a ?m|in the morning)\b", suffix):
             hour %= 12
-        elif re.match(r"(?:p ?m|in the (?:afternoon|evening))\b", suffix):
+        elif re.match(r"(?:p ?m|in the (?:afternoon|evening)|at night|tonight)\b", suffix):
             hour = hour % 12 + 12
     total = (int(hour) * 60 + int(minute) + offset) % (24 * 60)
     return f"{total // 60:02}:{total % 60:02}"
@@ -329,6 +331,13 @@ def _time_evidence(value: str, quote: str, words: str) -> bool:
             if not _CARDINAL_WORDS.match(suffix) and _clock(_number(match[1]), 0, suffix) == value:
                 return True
     return (value == "12:00" and _contains(words, "noon")) or (value == "00:00" and _contains(words, "midnight"))
+
+
+def _twelve_hours_apart(value: Any) -> str | None:
+    if not isinstance(value, str) or not _DIGITAL_TIME.fullmatch(value):
+        return None
+    hour, minute = value.split(":")
+    return f"{(int(hour) + 12) % 24:02}:{minute}"
 
 
 def _timetable_only(value: str, sources: Sequence[str]) -> bool:
@@ -466,61 +475,82 @@ def _read_operations(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, Any
 
 def parse_delta(
     form: Form, current: Mapping[str, Any], raw: str, *, allow_clear: bool = True,
-    evidence_sources: Sequence[str], diagnostics: dict[str, int] | None = None,
+    evidence_sources: Sequence[str], diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return valid changed values whose quotes and literals are supported by supplied transcript."""
+    """Return valid changed values whose quotes and literals are supported by supplied transcript.
+
+    With ``diagnostics``, each dropped proposal is listed under ``dropped`` with its reason, for the run log.
+    """
     assignments, facts = _read_operations(raw)
     sources = [_words(source) for source in evidence_sources if source]
     fields = {spec.field_id: spec for spec in form.fields}
     delta: dict[str, Any] = {}
     rejected = 0
+    dropped: list[dict[str, Any]] = []
+
+    def drop(op: dict[str, Any], reason: str, *, grounding: bool = True) -> None:
+        nonlocal rejected
+        rejected += grounding
+        dropped.append({"field": op["field"], "value": op.get("value", op.get("add")), "quote": op["quote"][:160],
+                        "reason": reason})
+
     for op in [*facts, *assignments]:
         field_id = op["field"]
         spec = fields.get(field_id)
         if spec is None or field_id in delta:
+            drop(op, "unknown_field" if spec is None else "repeated_field", grounding=False)
             continue
         previous = current.get(field_id)
         quote = op["quote"]
         words = _words(quote)
         if not any(_contains(source, words) for source in sources):
-            rejected += 1
+            drop(op, "quote_not_in_transcript")
             continue
         can_remove = allow_clear and bool(_WITHDRAWAL.search(words))
         if "add" in op:
             if spec.type != FieldType.textarea:
+                drop(op, "facts_on_typed_field", grounding=False)
                 continue
             value = _edit_facts(previous, op, can_remove)
         else:
             value = _normalize(spec, op["value"])
             if value == "" or value == [] or (isinstance(value, float) and not math.isfinite(value)):
+                drop(op, "empty_value", grounding=False)
                 continue
             if value_error(spec, value) is not None:
+                drop(op, "invalid_value", grounding=False)
                 continue
             if spec.type == FieldType.textarea and value is not None:
+                drop(op, "textarea_replace", grounding=False)
                 continue  # A fact edit can add lines without replacing the accumulated text.
             if spec.type == FieldType.multiselect and value is not None:
                 prior = set(previous or [])
                 selected = set(value)
                 additions = {item for item in selected - prior if _ground_value(spec, item, quote, words)}
                 if selected - prior - additions:
-                    rejected += 1
+                    drop(op, "option_not_supported")
                 keep = (prior & selected) if can_remove else prior
                 if additions | keep == prior:
                     continue
                 value = [option for option in spec.options if option in additions | keep] or None
             elif _weekday_select(spec) and value is not None:
                 if not _day_evidence(value, words, sources):
-                    rejected += 1
+                    drop(op, "day_not_supported")
                     continue
             elif not _ground_value(spec, value, quote, words):
-                rejected += 1
-                continue
+                literal = _twelve_hours_apart(value) if spec.type == FieldType.time else None
+                if literal is None or not _ground_value(spec, literal, quote, words):
+                    drop(op, "value_not_in_quote")
+                    continue
+                value = literal  # "quarter past 11" with no am/pm is shown as said: 11:15, not 23:15.
             if (spec.type == FieldType.time and value is not None and "caller wants" in spec.prompt.casefold()
                     and _timetable_only(value, evidence_sources)):
-                rejected += 1
+                drop(op, "timetable_only")
                 continue
         if (value is not None or allow_clear) and value != previous:
             delta[field_id] = value
     if diagnostics is not None:
         diagnostics.update(proposed=len(assignments) + len(facts), accepted=len(delta), grounding_rejected=rejected)
+        if dropped:
+            diagnostics["dropped"] = dropped
     return delta

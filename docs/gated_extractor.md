@@ -28,6 +28,11 @@ Every update still needs a quote found in the transcript. The check now also acc
   Letters that fit inside the name already heard confirm it and change nothing. A spelled name is then locked
   against model replies that repeat the misheard form.
 
+- A time stated without am/pm is shown as said ("quarter past 11" is 11:15 even if the model writes 23:15).
+  "at night" and "tonight" mark the evening.
+- Booking requests are spaced at least 2 s apart (was 4 s), and the gate treats spelling variants as options.
+- Each dropped proposal is logged in `calls.jsonl` under `delta_diagnostics.dropped` with its reason.
+
 `tests/test_extractor_rules.py` holds the regressions, with synthetic phrasings beyond the pilot calls.
 `scripts/scripted_sng1193.py` replays SNG1193 with scripted replies that make the pilot's mistakes, so the
 normal scorer can check the local rules end to end without a provider (`Scripted`), and runs the local rules

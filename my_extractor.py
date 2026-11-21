@@ -210,7 +210,7 @@ class MyExtractor(Extractor):
 
                 error = result.error
                 delta: dict[str, Any] = {}
-                diagnostics: dict[str, int] = {}
+                diagnostics: dict[str, Any] = {}
                 if error is None:
                     try:
                         delta = parse_delta(

@@ -30,6 +30,11 @@ _RETRACTION = re.compile(
 _CLAUSE = re.compile(r"([^.!?;]+)([.!?;]|$)")
 # A caller asking to book a table is asking for a restaurant even without the word.
 _TABLE = re.compile(r"\b(?:book|reserve|get|need|want|like) (?:a|us a|me a) table\b(?! (?:lamp|cloth))")
+# "looking for a place that we can have. we can eat indian food": the request can span a recognizer's full stop.
+_EAT = re.compile(
+    r"\b(?:looking for|want|need|find)\b[^?]{0,20}\b(?:a place|somewhere)\b[^?]{0,40}?\b(?:to|can|could) "
+    r"(?:eat|dine|have (?:dinner|lunch|breakfast))\b(?=[^?]*(?:$|[.!;]))"
+)
 _NOUNS = {"hotel": re.compile(r"^rooms?\b"), "train": re.compile(r"^tickets?\b")}
 
 
@@ -119,4 +124,6 @@ def requested_services(form: Form, message: Partial, *, caller: str | None = Non
             )
         elif (finished and caller is None) or (caller is not None and speaker == caller):
             services.update(_piece_services(text, options, option_pattern, finished=finished, first_only=False))
+            if "restaurant" in options and _EAT.search(text) and not _RETRACTION.search(text):
+                services.add(options["restaurant"])
     return services
