@@ -262,3 +262,84 @@ def test_gate_sees_spelling_variant_as_option(form):
     schedule = Gate(form).schedule("in the center of the city", recent="", first_at=10, last_call=0,
                                    finished=False, final=False)
     assert schedule is not None and schedule.reason == "slot_signal"
+
+
+# Found in the full Gemini 2.5 Flash run ----------------------------------------------------------------------
+
+def test_dictated_id_across_backchannels(form):
+    text = "A: yeah, it's 0, 3, 0, 3. B: okay. A: 7 8 2 3. B: okay. A: 1 7 7 9."
+    quote = "0, 3, 0, 3. 7 8 2 3. 1 7 7 9."   # the model left out the agent's "okay"
+    assert delta(form, "profile_id_number", "030378231779", quote, text) == {"profile_id_number": "030378231779"}
+    assert delta(form, "profile_id_number", "0303", "my id is 0, 3, 0, 3.", "A: my id is 0, 3, 0, 3.") == {
+        "profile_id_number": "0303"}
+    assert delta(form, "profile_id_number", "030378231780", quote, text) == {}
+
+
+def test_two_word_prefix_names_long_station(form):
+    text = "A: i need a train to london, liverpool"
+    assert delta(form, "train_destination", "london liverpool street", "train to london, liverpool", text) == {
+        "train_destination": "london liverpool street"}
+    # "london kings" is shared by no other option, but "london" alone is ambiguous.
+    assert delta(form, "train_destination", "london kings cross", "train to london", "A: train to london") == {}
+
+
+def test_partner_makes_two(form):
+    text = "A: it will be myself and my partner"
+    assert delta(form, "hotel_people", 2, "myself and my partner", text) == {"hotel_people": 2}
+
+
+def test_doesnt_need_parking_is_false(form):
+    text = "A: it doesn't need to have free parking"
+    assert delta(form, "hotel_parking", False, "it doesn't need to have free parking", text) == {"hotel_parking": False}
+
+
+def test_attraction_service_cues(form):
+    text = "A: i also looking for places to go in town"
+    assert delta(form, "services", ["attraction"], "looking for places to go in town", text) == {
+        "services": ["attraction"]}
+
+
+def test_http_error_status_does_not_stop_the_run(monkeypatch):
+    import asyncio
+
+    from strategies import openrouter
+
+    client = openrouter.OpenRouterClient(api_key="test", model="google/gemini-2.5-flash",
+                                         usd_per_million={"input_tokens": 0.3, "output_tokens": 2.5},
+                                         eur_per_usd=0.86, budget_usd=1.0)
+    calls = []
+
+    def fail(messages, max_tokens):
+        calls.append(1)
+        error = openrouter._RequestFailed("OpenRouter returned HTTP 503.")
+        error.http_status = 503
+        raise error
+
+    monkeypatch.setattr(client, "_request", fail)
+    messages = [{"role": "user", "content": "x"}]
+    first = asyncio.run(client.complete(messages, max_tokens=50))
+    second = asyncio.run(client.complete(messages, max_tokens=50))
+    assert first.error and second is not None and len(calls) == 2
+
+    def hang(messages, max_tokens):
+        raise TimeoutError
+
+    monkeypatch.setattr(client, "_request", hang)
+    asyncio.run(client.complete(messages, max_tokens=50))
+    assert asyncio.run(client.complete(messages, max_tokens=50)) is None  # a timeout may bill: stop
+
+
+def test_dictated_number_extends_digits_already_shown(form):
+    # The first groups scrolled out of the window; the model quotes the new group only.
+    text = "A: 1, 4, 3, 2."
+    current = {"profile_id_number": "030378231779"}
+    assert delta(form, "profile_id_number", "0303782317791432", "1, 4, 3, 2.", text, current=current) == {
+        "profile_id_number": "0303782317791432"}
+    assert delta(form, "profile_id_number", "0303782317791433", "1, 4, 3, 2.", text, current=current) == {}
+
+
+def test_dictation_spans_recent_and_new_turns(form):
+    recent, new = "A: 0, 3, 0, 3. B: okay.", "A: 7 8 2 3."
+    quote = "0, 3, 0, 3. 7 8 2 3."
+    assert parse_delta(form, {}, op("profile_id_number", "03037823", quote),
+                       evidence_sources=(new, "", recent)) == {"profile_id_number": "03037823"}

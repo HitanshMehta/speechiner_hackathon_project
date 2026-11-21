@@ -27,7 +27,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from strategies.delta import RESPONSE_FORMAT
 
-DEFAULT_MODEL = "google/gemini-2.5-flash-lite"
+DEFAULT_MODEL = "google/gemini-2.5-flash"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 ENV_PREFIX = "LFE_OPENROUTER_"
 TIMEOUT_S = 7.0
@@ -94,6 +94,8 @@ class _RejectRedirect(HTTPRedirectHandler):
 class _RequestFailed(Exception):
     """Safe error text for the run log. Provider response bodies can contain sensitive data."""
 
+    http_status: int | None = None
+
 
 class OpenRouterClient:
     """One instance shares a local budget among all conversations of a run."""
@@ -154,19 +156,23 @@ class OpenRouterClient:
         self._reserved_usd += reserve
         started = time.monotonic()
         result = None
+        rejected = False
         try:
             async with asyncio.timeout(TIMEOUT_S):
                 response = await asyncio.to_thread(self._request, messages, max_tokens)
             result = self._completion(response, time.monotonic() - started)
             return result
         except (TimeoutError, _RequestFailed) as error:
+            # An HTTP error status (e.g. 503, no provider available) comes back before generation. The reserve
+            # is still counted as spent, but later requests may go ahead. A timeout can still bill, so it blocks.
+            rejected = getattr(error, "http_status", None) is not None
             reason = "OpenRouter request timed out." if isinstance(error, TimeoutError) else str(error)
             return Completion(None, self.model, {}, {}, time.monotonic() - started, reason)
         finally:
             self._reserved_usd -= reserve
             if result is None or result.cost_usd is None:
                 self._spent_usd += reserve
-                self._blocked = True
+                self._blocked = self._blocked or not rejected
             else:
                 self._spent_usd += result.cost_usd
                 if result.cost_usd > reserve:
@@ -200,7 +206,9 @@ class OpenRouterClient:
             response = json.loads(payload)
         except HTTPError as error:
             error.close()
-            raise _RequestFailed(f"OpenRouter returned HTTP {error.code}.") from None
+            failure = _RequestFailed(f"OpenRouter returned HTTP {error.code}.")
+            failure.http_status = error.code
+            raise failure from None
         except (URLError, OSError):
             raise _RequestFailed("OpenRouter connection failed.") from None
         except (UnicodeDecodeError, json.JSONDecodeError):

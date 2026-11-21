@@ -54,7 +54,7 @@ Use the live pilot to measure accuracy and time to correct values.
 
 Store `OPENROUTER_API_KEY` as an environment secret and allow outbound HTTPS to `openrouter.ai`.
 OpenRouter's `GET /api/v1/key` endpoint can check access without making a completion.
-The default model ID is `google/gemini-2.5-flash-lite`. It uses the OpenRouter key.
+The default model ID is `google/gemini-2.5-flash`, the hackathon baseline model (rates: input 0.30, output 2.50, cache read 0.03, cache write 0.0833 USD per million tokens). It uses the OpenRouter key.
 
 Before approving a live run, set the following non-secret variables. Confirm the route's current rates with
 OpenRouter for the selected model.

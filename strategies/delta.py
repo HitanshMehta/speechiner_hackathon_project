@@ -79,7 +79,7 @@ _ONE_DIGIT_HOUR = re.compile(r"[0-9]:[0-5][0-9]\Z")
 _SPEAKER = re.compile(r"(?<!\w)(?:[A-Z]|PENDING):\s*")
 _WORD = re.compile(r"[^\W_]+")
 _STATION_VARIANT = re.compile(r"[a-z]{2,}[iy]\Z")
-_WITHDRAWAL = re.compile(r"\b(?:no|not|instead|rather|cancel\w*|withdraw\w*|retract\w*|forget|never|don t)\b")
+_WITHDRAWAL = re.compile(r"\b(?:no|not|instead|rather|cancel\w*|withdraw\w*|retract\w*|forget|never|don t|doesn t|does not|didn t|isn t|no need)\b")
 _UNITS = dict(zip(
     ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
      "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"),
@@ -113,12 +113,23 @@ _DAY_OFFSET = re.compile(
     rf"\b(?:(the day after tomorrow)|(tomorrow)|(?:in )?({_CARDINAL}) days? (?:from now|from today|later|ahead)|"
     rf"in ({_CARDINAL}) days?)\b"
 )
+_PARTNER = re.compile(
+    r"\b(?:myself|me) and (?:my|a) (?:partner|wife|husband|friend|boyfriend|girlfriend|son|daughter|colleague|"
+    r"mother|father|mum|mom|dad|brother|sister|fiance|fiancee)\b"
+)
+_DIGIT_FILLERS = frozenset({
+    "a", "b", "okay", "ok", "yes", "yeah", "uh", "um", "mhm", "hmm", "and", "it", "s", "its", "is", "my", "then",
+    "sorry", "right", "correct", "got", "that", "so",
+})
 _SERVICE_CUES = {
     "restaurant": re.compile(
         r"\b(?:restaurants?|(?:book|reserve|get|need|want) (?:a |us a |me a )?table|table for|eat|food|dine|dining|"
         r"dinner|lunch)\b"),
     "hotel": re.compile(r"\b(?:hotels?|guest ?houses?|place to stay|somewhere to stay|accommodation)\b"),
     "taxi": re.compile(r"\b(?:taxis?|cabs?)\b"),
+    "attraction": re.compile(
+        r"\b(?:attractions?|tourist|sightseeing|sights|places? to (?:go|visit|see)|things to (?:do|see)|museums?|"
+        r"colleges?|theatres?|cinemas?|nightclubs?|parks?|architecture|entertainment|swimming pool|boat)\b"),
 }
 _ACCEPT_TIME = re.compile(r"^(?:that works(?: for (?:me|us))?|(?:i|we) (?:ll|will) take (?:it|that)|book it)\b")
 
@@ -285,6 +296,8 @@ def _companions(match: re.Match[str]) -> str:
 
 
 def _number_evidence(value: float, quote: str, words: str) -> bool:
+    if value == 2 and _PARTNER.search(words):
+        return True
     if _COMPANIONS.search(words):
         # "myself and five others" says six; the bare five is not the group size.
         words = _COMPANIONS.sub(_companions, words)
@@ -416,11 +429,35 @@ def _phone_evidence(value: str, words: str) -> bool:
             continue
         digit = word if word.isdecimal() else digits.get(word)
         if digit is None:
-            runs.append("")
+            # Dictation in groups ("0 3 0 3. B: okay. A: 7 8 2 3") keeps one run across backchannels.
+            if word not in _DIGIT_FILLERS:
+                runs.append("")
         else:
             runs[-1] += digit * repeats
         repeats = 1
-    return target in runs
+    # A dictation still in progress shows the digits said so far.
+    return any(run.startswith(target) for run in runs)
+
+
+def _extends(previous: Any, value: str, words: str) -> bool:
+    """A longer dictated number: the digits shown so far, then new digits the evidence holds as one run."""
+    if not isinstance(previous, str) or not previous or not value.startswith(previous) or value == previous:
+        return False
+    return _phone_evidence(value[len(previous):], words) or _phone_evidence(value, words)
+
+
+def _digits_field(spec: FieldSpec) -> bool:
+    return spec.type == FieldType.phone or (spec.type == FieldType.text and "digits only" in spec.prompt.casefold())
+
+
+def _option_prefix(spec: FieldSpec, value: str, words: str) -> bool:
+    """A long option named by its first two words, when no other option starts with them ("london liverpool")."""
+    parts = value.casefold().split()
+    if spec.type != FieldType.select or len(parts) < 3:
+        return False
+    prefix = " ".join(parts[:2])
+    sharing = [option for option in spec.options if option.casefold().startswith(prefix + " ")]
+    return len(sharing) == 1 and _contains(words, prefix)
 
 
 def _ground_value(spec: FieldSpec, value: Any, quote: str, words: str) -> bool:
@@ -430,7 +467,7 @@ def _ground_value(spec: FieldSpec, value: Any, quote: str, words: str) -> bool:
         return _number_evidence(value, quote, words)
     if spec.type == FieldType.time:
         return _time_evidence(value, quote, words)
-    if spec.type == FieldType.phone:
+    if _digits_field(spec) and isinstance(value, str):
         return _phone_evidence(value, words)
     if spec.type == FieldType.checkbox:
         return value or bool(_WITHDRAWAL.search(words) or _contains(words, "without"))
@@ -444,6 +481,8 @@ def _ground_value(spec: FieldSpec, value: Any, quote: str, words: str) -> bool:
     if spec.type == FieldType.select and (number := _number(value)) is not None and math.isfinite(number):
         return _number_evidence(number, quote, words)
     if _contains(words, _words(value)):
+        return True
+    if _option_prefix(spec, value, words):
         return True
     if spec.type == FieldType.text and _in_order(_words(value).split(), words.split()):
         return True  # "first name is rebecca, last name is louie" states "rebecca louie".
@@ -504,8 +543,16 @@ def parse_delta(
         quote = op["quote"]
         words = _words(quote)
         if not any(_contains(source, words) for source in sources):
-            drop(op, "quote_not_in_transcript")
-            continue
+            # A dictated number may be quoted without the backchannels between its groups.
+            digits = _normalize(spec, op.get("value")) if _digits_field(spec) else None
+            # Sources arrive as (new turns, unfinished turn, recent turns); a dictation can span all three.
+            spans = [*sources, " ".join(sources[-1:] + sources[:-1])]
+            match = next((source for source in spans if isinstance(digits, str) and digits
+                          and (_phone_evidence(digits, source) or _extends(previous, digits, source))), None)
+            if match is None:
+                drop(op, "quote_not_in_transcript")
+                continue
+            quote, words = match, match
         can_remove = allow_clear and bool(_WITHDRAWAL.search(words))
         if "add" in op:
             if spec.type != FieldType.textarea:
@@ -537,7 +584,8 @@ def parse_delta(
                 if not _day_evidence(value, words, sources):
                     drop(op, "day_not_supported")
                     continue
-            elif not _ground_value(spec, value, quote, words):
+            elif not _ground_value(spec, value, quote, words) and not (
+                    _digits_field(spec) and isinstance(value, str) and _extends(previous, value, words)):
                 literal = _twelve_hours_apart(value) if spec.type == FieldType.time else None
                 if literal is None or not _ground_value(spec, literal, quote, words):
                     drop(op, "value_not_in_quote")
