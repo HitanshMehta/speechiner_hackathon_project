@@ -31,6 +31,7 @@ DEFAULT_MODEL = "google/gemini-2.5-flash"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 ENV_PREFIX = "LFE_OPENROUTER_"
 TIMEOUT_S = 7.0
+MAX_UNRESOLVED = 3
 RESPONSE_LIMIT = 512 * 1024
 MODEL_ID = re.compile(r"[a-zA-Z0-9._-]+/[a-zA-Z0-9._:-]+")
 
@@ -112,6 +113,7 @@ class OpenRouterClient:
         self._spent_usd = 0.0
         self._reserved_usd = 0.0
         self._blocked = False
+        self._unresolved = 0  # failed requests in a row whose charge is unknown
 
     @classmethod
     def from_env(cls) -> OpenRouterClient:
@@ -163,8 +165,9 @@ class OpenRouterClient:
             result = self._completion(response, time.monotonic() - started)
             return result
         except (TimeoutError, _RequestFailed) as error:
-            # An HTTP error status (e.g. 503, no provider available) comes back before generation. The reserve
-            # is still counted as spent, but later requests may go ahead. A timeout can still bill, so it blocks.
+            # An HTTP error status (e.g. 503, no provider available) comes back before generation. A timeout may
+            # still bill, but never more than its reserve: max_tokens and max_price bound it. The reserve is counted
+            # as spent and later requests go ahead, until MAX_UNRESOLVED failures in a row block the client.
             rejected = getattr(error, "http_status", None) is not None
             reason = "OpenRouter request timed out." if isinstance(error, TimeoutError) else str(error)
             return Completion(None, self.model, {}, {}, time.monotonic() - started, reason)
@@ -172,8 +175,10 @@ class OpenRouterClient:
             self._reserved_usd -= reserve
             if result is None or result.cost_usd is None:
                 self._spent_usd += reserve
-                self._blocked = self._blocked or not rejected
+                self._unresolved += not rejected
+                self._blocked = self._blocked or self._unresolved >= MAX_UNRESOLVED
             else:
+                self._unresolved = 0
                 self._spent_usd += result.cost_usd
                 if result.cost_usd > reserve:
                     self._blocked = True

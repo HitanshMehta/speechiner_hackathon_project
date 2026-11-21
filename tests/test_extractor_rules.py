@@ -313,7 +313,7 @@ def test_attraction_service_cues(form):
         "services": ["attraction"]}
 
 
-def test_http_error_status_does_not_stop_the_run(monkeypatch):
+def test_http_errors_and_single_timeouts_do_not_stop_the_run(monkeypatch):
     import asyncio
 
     from strategies import openrouter
@@ -339,8 +339,20 @@ def test_http_error_status_does_not_stop_the_run(monkeypatch):
         raise TimeoutError
 
     monkeypatch.setattr(client, "_request", hang)
-    asyncio.run(client.complete(messages, max_tokens=50))
-    assert asyncio.run(client.complete(messages, max_tokens=50)) is None  # a timeout may bill: stop
+    spent = client._spent_usd
+    timed_out = asyncio.run(client.complete(messages, max_tokens=50))
+    assert timed_out.error and client._spent_usd > spent  # a timeout may bill: its reserve counts as spent
+
+    monkeypatch.setattr(client, "_request", lambda messages, max_tokens: {
+        "model": "google/gemini-2.5-flash", "usage": {"prompt_tokens": 10, "completion_tokens": 2, "cost": 0.00001},
+        "choices": [{"message": {"content": '{"set":[],"facts":[]}'}}]})
+    recovered = asyncio.run(client.complete(messages, max_tokens=50))
+    assert recovered is not None and recovered.error is None  # one timeout does not stop the run
+
+    monkeypatch.setattr(client, "_request", hang)
+    for _ in range(openrouter.MAX_UNRESOLVED):
+        asyncio.run(client.complete(messages, max_tokens=50))
+    assert asyncio.run(client.complete(messages, max_tokens=50)) is None  # repeated timeouts stop it
 
 
 def test_dictated_number_extends_digits_already_shown(form):
