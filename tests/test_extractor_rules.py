@@ -390,3 +390,31 @@ def test_whole_note_as_value_becomes_fact_lines(meeting):
                                  "quote": "they have to be waterproof"}], "facts": []})
     assert parse_delta(meeting, {}, reply, evidence_sources=(text,)) == {
         field: "The Marketing Expert said it should be waterproof."}
+
+
+def test_quote_with_one_corrected_word(form):
+    text = "A: uh, i'd like to live the place of attraction by 11 a. m.."
+    assert delta(form, "taxi_leave_at", "11:00", "leave the place of attraction by 11 a. m.", text) == {
+        "taxi_leave_at": "11:00"}
+    # A changed number is never a correction of the recognizer.
+    assert delta(form, "taxi_leave_at", "12:00", "live the place of attraction by 12 a. m.", text) == {}
+    # Short quotes must match exactly.
+    assert delta(form, "taxi_leave_at", "11:00", "leave at 11", "A: live at 11") == {}
+
+
+def test_agent_information_is_not_a_caller_value(form):
+    text = "A: they address the phone number and the full type. B: okay, the restaurant serves italian food."
+    assert delta(form, "restaurant_food", "italian", "the restaurant serves italian food", text) == {}
+    text = ("A: we can eat indian food in the center. B: that would be the golden curry. and they definitely serve "
+            "indian. is that okay with you.")
+    assert delta(form, "restaurant_name", "golden curry", "golden curry", text) == {"restaurant_name": "golden curry"}
+    text = "A: it should depart from kingsland. B: from kings lynn to cambridge, right."
+    assert delta(form, "train_departure", "kings lynn", "from kings lynn", text) == {"train_departure": "kings lynn"}
+    text = "A: a restaurant serving italian food please"
+    assert delta(form, "restaurant_food", "italian", "italian food", text) == {"restaurant_food": "italian"}
+
+
+def test_agent_answer_across_sources(form):
+    recent, new = "A: the entry fee open hours in the area.", "B: and the cambridge corn exchange is located in the centre."
+    reply = op("attraction_area", "centre", "located in the centre")
+    assert parse_delta(form, {}, reply, evidence_sources=(new, "", recent)) == {}

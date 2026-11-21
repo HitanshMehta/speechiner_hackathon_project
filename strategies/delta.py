@@ -275,6 +275,21 @@ def _words(text: str) -> str:
     return " ".join(_SPELLING.get(word, word) for word in _WORD.findall(plain))
 
 
+def _near_quote(haystack: str, needle: str) -> bool:
+    """A quote of 5+ words in which the model fixed one misrecognized word ("leave" for "live").
+
+    Digits and number words must match exactly, so a corrected value can never pass as a quote.
+    """
+    quote, text = needle.split(), haystack.split()
+    if len(quote) < 5:
+        return False
+    for start in range(len(text) - len(quote) + 1):
+        misses = [(a, b) for a, b in zip(quote, text[start:start + len(quote)]) if a != b]
+        if len(misses) == 1 and not any(_number(word) is not None for word in misses[0]):
+            return True
+    return False
+
+
 def _contains(haystack: str, needle: str) -> bool:
     return bool(needle) and f" {needle} " in f" {haystack} "
 
@@ -417,6 +432,43 @@ def _day_evidence(value: str, words: str, sources: Sequence[str]) -> bool:
     return not any(value in _reference_days(source) and _day_offset(source) is not None for source in sources)
 
 
+_INFO_REQUEST = re.compile(
+    r"\b(?:what|which|where|address|phone|postcode|post code|type|information|info|fee|price|cost|how much|"
+    r"open(?:ing)? hours|tell me)\b"
+)
+_SEGMENT = re.compile(r"(?<!\w)([A-Z]|PENDING):\s*")
+
+
+def _agent_info_only(words: str, raw_sources: Sequence[str], caller: str = "A") -> bool:
+    """The quote is only in an agent answer to the caller's request for information.
+
+    "What type of food is it?" then "the restaurant serves italian food": the caller asked, so italian is not a
+    caller constraint. An agent proposal or read-back after a caller's request stays usable.
+    """
+    # The extractor passes (new turns, unfinished turn, recent turns); recent turns come first in time.
+    ordered = [*raw_sources[2:], *raw_sources[:2]]
+    segments: list[tuple[str | None, str]] = []
+    for raw in ordered:
+        if not raw:
+            continue
+        parts = _SEGMENT.split(raw)
+        if parts[0].strip():
+            segments.append((None, parts[0]))
+        segments += list(zip(parts[1::2], parts[2::2]))
+    found_agent = False
+    for index, (speaker, text) in enumerate(segments):
+        plain = _words(text)
+        if not _contains(plain, words) and not _near_quote(plain, words):
+            continue
+        if speaker != "B":
+            return False
+        before = next((_words(t) for s, t in reversed(segments[:index]) if s == caller), None)
+        if before is None or not _INFO_REQUEST.search(before):
+            return False
+        found_agent = True
+    return found_agent
+
+
 def _phone_evidence(value: str, words: str) -> bool:
     target = "".join(char for char in value if char.isdecimal())
     if not target:
@@ -552,7 +604,7 @@ def parse_delta(
         previous = current.get(field_id)
         quote = op["quote"]
         words = _words(quote)
-        if not any(_contains(source, words) for source in sources):
+        if not any(_contains(source, words) or _near_quote(source, words) for source in sources):
             # A dictated number may be quoted without the backchannels between its groups.
             digits = _normalize(spec, op.get("value")) if _digits_field(spec) else None
             # Sources arrive as (new turns, unfinished turn, recent turns); a dictation can span all three.
@@ -601,6 +653,10 @@ def parse_delta(
                     drop(op, "value_not_in_quote")
                     continue
                 value = literal  # "quarter past 11" with no am/pm is shown as said: 11:15, not 23:15.
+            if (not meeting and value is not None and spec.type in (FieldType.select, FieldType.text)
+                    and not field_id.startswith("profile_") and _agent_info_only(words, evidence_sources)):
+                drop(op, "agent_information")
+                continue
             if (spec.type == FieldType.time and value is not None and "caller wants" in spec.prompt.casefold()
                     and _timetable_only(value, evidence_sources)):
                 drop(op, "timetable_only")
