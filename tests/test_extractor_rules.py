@@ -418,3 +418,10 @@ def test_agent_answer_across_sources(form):
     recent, new = "A: the entry fee open hours in the area.", "B: and the cambridge corn exchange is located in the centre."
     reply = op("attraction_area", "centre", "located in the centre")
     assert parse_delta(form, {}, reply, evidence_sources=(new, "", recent)) == {}
+
+
+def test_agent_proposal_after_caller_constraints_stays(form):
+    text = ("A: we can eat indian food in the exclusive price range in the center of the city. "
+            "B: let me see the sense of the city that would be the golden curry.")
+    assert delta(form, "restaurant_name", "golden curry", "the golden curry", text) == {
+        "restaurant_name": "golden curry"}

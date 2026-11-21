@@ -433,7 +433,7 @@ def _day_evidence(value: str, words: str, sources: Sequence[str]) -> bool:
 
 
 _INFO_REQUEST = re.compile(
-    r"\b(?:what|which|where|address|phone|postcode|post code|type|information|info|fee|price|cost|how much|"
+    r"\b(?:what|which|where|address|phone|postcode|post code|information|info|fee|how much|"
     r"open(?:ing)? hours|tell me)\b"
 )
 _SEGMENT = re.compile(r"(?<!\w)([A-Z]|PENDING):\s*")
