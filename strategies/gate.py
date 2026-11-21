@@ -28,7 +28,7 @@ _SMALL_TALK = frozenset({
 
 
 # Minimum seconds between booking-form requests. Values count as fast only within 8 s of being said.
-_SLOT_SPACING_S = 2.0
+_SLOT_SPACING_S = 1.0
 
 
 @dataclass(frozen=True)
