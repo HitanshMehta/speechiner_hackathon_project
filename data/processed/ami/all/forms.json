@@ -1,0 +1,91 @@
+{
+ "IS1006a": {
+  "name": "AMI meeting IS1006a",
+  "system_prompts": {
+   "form_data_extraction": "You take notes on a meeting of a design team from its live transcript. The speakers are: A = User Interface Designer, B = Project Manager, C = Marketing Expert, D = Industrial Designer. Each field asks one question. Answer it with a list of facts: one fact per line, with a line break after each fact, never two facts on the same line. A fact is one thing a person of the meeting said, proposed, asked, objected to or agreed to, written as one full sentence that names the person by their role. A field with two facts holds two lines:\nThe Project Manager proposed a blue case.\nThe Marketing Expert said that blue is not trendy.\nWrite only what was said: no summary and no conclusion of your own, and a proposal is not a decision. A question that asks for a summary is answered with facts too. Write a fact as soon as it is said. Leave a field empty until the meeting says something that answers its question.",
+   "transcription": "A meeting of a small design team that develops a new remote control."
+  },
+  "fields": [
+   {
+    "field_id": "actions",
+    "label": "Actions",
+    "type": "textarea",
+    "prompt": "Every task someone has to do after the meeting (who will do what), one per line."
+   },
+   {
+    "field_id": "qmsum_5",
+    "label": "Question 5 (QMSum)",
+    "type": "textarea",
+    "prompt": "Summarize the discussion about the design of remote control for children. Answer with facts, one per line."
+   },
+   {
+    "field_id": "qmsum_6",
+    "label": "Question 6 (QMSum)",
+    "type": "textarea",
+    "prompt": "What did the group think of safety design when discussing the design of remote control for children? Answer with facts, one per line."
+   },
+   {
+    "field_id": "mised_2",
+    "label": "Question 2 (MISeD)",
+    "type": "textarea",
+    "prompt": "What suggestions did the User Interface Designer make regarding the remote control's color and robustness? Answer with facts, one per line."
+   },
+   {
+    "field_id": "mised_5",
+    "label": "Question 5 (MISeD)",
+    "type": "textarea",
+    "prompt": "What did the participants think about the potential inclusion of voice-enabled features on the new remote control? Answer with facts, one per line."
+   },
+   {
+    "field_id": "mised_7",
+    "label": "Question 7 (MISeD)",
+    "type": "textarea",
+    "prompt": "They also considered the inclusion of a child-lock mechanism. Can you give more details about that? Answer with facts, one per line."
+   },
+   {
+    "field_id": "mised_8",
+    "label": "Question 8 (MISeD)",
+    "type": "textarea",
+    "prompt": "What did they suggest regarding the waterproof or water-resistant features? Answer with facts, one per line."
+   },
+   {
+    "field_id": "mised_9",
+    "label": "Question 9 (MISeD)",
+    "type": "textarea",
+    "prompt": "What was the Marketing Expert's opinion on incorporating voice-enabled features into the remote control's design? Answer with facts, one per line."
+   },
+   {
+    "field_id": "topics",
+    "label": "Topics covered",
+    "type": "multiselect",
+    "prompt": "Every topic the meeting covered.",
+    "options": [
+     "opening",
+     "closing",
+     "agenda/equipment issues",
+     "chitchat",
+     "project specs and roles of participants",
+     "new requirements",
+     "user target group",
+     "interface specialist presentation",
+     "marketing expert presentation",
+     "industrial designer presentation",
+     "presentation of prototype(s)",
+     "discussion",
+     "evaluation of prototype(s)",
+     "evaluation of project process",
+     "costing",
+     "drawing exercise",
+     "project budget",
+     "existing products",
+     "trendwatching",
+     "user requirements",
+     "components, materials and energy sources",
+     "look and usability",
+     "how to find when misplaced"
+    ],
+    "append_options_to_prompt": true
+   }
+  ]
+ }
+}

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live form player</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="bar">
+  <h1>Live form player</h1>
+
+  <div class="seg" role="group" aria-label="What to play">
+    <button type="button" id="mode-live" aria-pressed="true" title="Run an extractor on the conversation now. Whatever it calls is really called.">Live run</button>
+    <button type="button" id="mode-review" aria-pressed="false" title="Replay how an earlier run filled the form. Nothing is called.">Review a run</button>
+  </div>
+
+  <label class="pick">Form
+    <select id="form"></select>
+  </label>
+  <label class="pick wide"><span id="source-label">Extractor</span>
+    <select id="source"></select>
+  </label>
+  <label class="pick narrow">Speed
+    <select id="speed"></select>
+  </label>
+
+  <button type="button" id="play" class="primary" disabled>
+    <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path id="play-icon" d="M4 2.5v11l9-5.5z"/></svg>
+    <span id="play-label">Start run</span>
+  </button>
+  <button type="button" id="sound" aria-pressed="false" title="Play the recording along with the conversation">
+    <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2 6h2.5L8 3v10L4.5 10H2z"/>
+      <path id="sound-waves" d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6.3 6.3 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>
+    <span id="sound-label">Sound off</span>
+  </button>
+
+  <div class="transport">
+    <span id="clock" class="clock">0:00</span>
+    <input type="range" id="scrub" min="0" max="1" step="any" value="0" aria-label="Position in the conversation" disabled>
+    <span id="length" class="clock">0:00</span>
+  </div>
+</header>
+
+<p id="notice" class="notice" role="status" aria-live="polite"></p>
+
+<main id="main">
+  <section class="metrics" aria-labelledby="metrics-title">
+    <div class="about">
+      <h2 id="metrics-title">Score so far</h2>
+      <p id="metrics-note">The official score of this form, computed as if the conversation ended at this moment. A value that was just said counts as missing until the form shows it.</p>
+      <button type="button" id="numbers-open" class="link">Show as a table</button>
+    </div>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <div class="work" id="work">
+    <section class="talk" aria-labelledby="talk-title">
+      <div class="head">
+        <h2 id="talk-title">Conversation</h2>
+        <p>What the extractor receives, when it receives it.</p>
+        <div class="seg small" role="group" aria-label="How the conversation is listed">
+          <button type="button" id="view-turns" aria-pressed="true" title="One line per turn, growing while it is spoken">Turns</button>
+          <button type="button" id="view-messages" aria-pressed="false" title="One line per message, exactly as the extractor got them: every partial and every finished turn">Every message</button>
+        </div>
+      </div>
+      <div class="caption" id="caption" aria-live="off"></div>
+      <div class="said" id="said"></div>
+      <div class="turns" id="scroller">
+        <table class="timeline">
+          <thead>
+            <tr>
+              <th scope="col">Time</th>
+              <th scope="col">What arrived</th>
+              <th scope="col" title="The values these words complete: what the field should show from here on">Should be filled</th>
+              <th scope="col" title="What the form filled while this was the latest thing it had received">Was filled</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <button type="button" id="follow" class="follow" hidden>Back to the latest line</button>
+    </section>
+
+    <div class="split" id="split" role="separator" aria-orientation="vertical" aria-label="Width of the conversation" aria-valuemin="22" aria-valuemax="70" aria-valuenow="40" tabindex="0"></div>
+
+    <section class="formview" aria-labelledby="form-title">
+      <div class="head">
+        <h2 id="form-title">Form</h2>
+        <p id="form-note"></p>
+        <div class="seg small" role="group" aria-label="Which fields are listed">
+          <button type="button" id="show-play" aria-pressed="true" title="The fields something is said about, and the fields the form filled">Fields in play</button>
+          <button type="button" id="show-all" aria-pressed="false">All fields</button>
+        </div>
+      </div>
+      <ul class="legend" id="legend" aria-label="What the marks on a field mean"></ul>
+      <div class="cards" id="cards"></div>
+    </section>
+  </div>
+
+  <section class="output" id="output" hidden>
+    <button type="button" id="output-toggle" class="link" aria-expanded="false">Extractor output</button>
+    <pre id="output-lines" hidden></pre>
+  </section>
+</main>
+
+<aside class="drawer" id="drawer" hidden aria-labelledby="drawer-title">
+  <div class="drawer-head">
+    <h2 id="drawer-title"></h2>
+    <button type="button" id="drawer-close" class="link">Close</button>
+  </div>
+  <div id="drawer-body"></div>
+</aside>
+
+<dialog id="numbers" aria-labelledby="numbers-title">
+  <div class="drawer-head">
+    <h2 id="numbers-title">Score so far, as a table</h2>
+    <button type="button" id="numbers-close" class="link">Close</button>
+  </div>
+  <div id="numbers-body"></div>
+</dialog>
+
+<div class="pop" id="pop" hidden role="tooltip"></div>
+<div class="readout" id="readout" hidden></div>
+<audio id="audio" preload="auto"></audio>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
