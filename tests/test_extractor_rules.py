@@ -42,6 +42,20 @@ def test_spelling_variant_needs_the_word(form):
     assert delta(form, "restaurant_area", "centre", "in the city", "A: somewhere in the city") == {}
 
 
+@pytest.mark.parametrize("value,text", [
+    ("south", "A: it should be on the opposite side of of the north"),
+    ("east", "A: the opposite end of town from the west"),
+])
+def test_opposite_direction_grounds(form, value, text):
+    quote = text.removeprefix("A: ")
+    assert delta(form, "restaurant_area", value, quote, text) == {"restaurant_area": value}
+
+
+def test_opposite_needs_the_other_direction(form):
+    text = "A: the opposite side of the centre"
+    assert delta(form, "restaurant_area", "south", text[3:], text) == {}
+
+
 # Group sizes --------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("field_id,quote,value", [

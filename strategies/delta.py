@@ -132,6 +132,7 @@ _SERVICE_CUES = {
         r"\b(?:attractions?|tourist|sightseeing|sights|places? to (?:go|visit|see)|things to (?:do|see)|museums?|"
         r"colleges?|theatres?|cinemas?|nightclubs?|parks?|architecture|entertainment|swimming pool|boat)\b"),
 }
+_OPPOSITE = {"north": "south", "south": "north", "east": "west", "west": "east"}
 _ACCEPT_TIME = re.compile(r"^(?:that works(?: for (?:me|us))?|(?:i|we) (?:ll|will) take (?:it|that)|book it)\b")
 
 
@@ -537,6 +538,10 @@ def _ground_value(spec: FieldSpec, value: Any, quote: str, words: str) -> bool:
         return True
     if _option_prefix(spec, value, words):
         return True
+    if spec.type == FieldType.select and (other := _OPPOSITE.get(value.casefold())):
+        # "the opposite side of the north" names the south.
+        if re.search(rf"\bopposite\b(?: \w+){{0,5}}? {other}\b", words):
+            return True
     if spec.type == FieldType.text and _in_order(_words(value).split(), words.split()):
         return True  # "first name is rebecca, last name is louie" states "rebecca louie".
     alternate = _alternate_station(value.casefold())
