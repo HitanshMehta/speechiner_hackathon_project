@@ -276,6 +276,19 @@ def _words(text: str) -> str:
     return " ".join(_SPELLING.get(word, word) for word in _WORD.findall(plain))
 
 
+_SPEAKER_LABEL = re.compile(r"(?:^|(?<=\s))[A-Z]:(?=\s)")
+_PASSAGE_RUN = 6
+
+
+def _passage_evidence(words: str, sources: Sequence[str]) -> bool:
+    """A meeting passage is grounded when it holds a run of six words in a row that the transcript says."""
+    tokens = words.split()
+    if len(tokens) < _PASSAGE_RUN:
+        return False
+    return any(_contains(source, " ".join(tokens[i:i + _PASSAGE_RUN]))
+               for i in range(len(tokens) - _PASSAGE_RUN + 1) for source in sources)
+
+
 def _near_quote(haystack: str, needle: str) -> bool:
     """A quote of 5+ words in which the model fixed one misrecognized word ("leave" for "live").
 
@@ -596,20 +609,30 @@ def parse_delta(
     for op in [*facts, *assignments]:
         field_id = op["field"]
         spec = fields.get(field_id)
+        # In a meeting, several notes for one field in one reply build on each other.
+        merging = meeting and spec is not None and field_id in delta
+        previous = delta[field_id] if merging else current.get(field_id)
         if spec is not None and meeting:
             if "add" in op and spec.type == FieldType.multiselect:
                 additions = [item for item in _fact_lines(op.get("add")) if item in spec.options]
-                op = {"field": field_id, "value": [*(current.get(field_id) or []), *additions], "quote": op["quote"]}
+                op = {"field": field_id, "value": [*(previous or []), *additions], "quote": op["quote"]}
             elif "value" in op and spec.type == FieldType.textarea and isinstance(op["value"], str):
                 # A whole note sent as a value: keep its new lines as fact additions.
                 op = {"field": field_id, "add": op["value"].splitlines(), "remove": [], "quote": op["quote"]}
-        if spec is None or field_id in delta:
+            elif merging and "value" in op and spec.type == FieldType.multiselect and isinstance(op["value"], list):
+                op = {**op, "value": [*(previous or []), *op["value"]]}
+        if spec is None or (field_id in delta and not merging):
             drop(op, "unknown_field" if spec is None else "repeated_field", grounding=False)
             continue
-        previous = current.get(field_id)
         quote = op["quote"]
         words = _words(quote)
-        if not any(_contains(source, words) or _near_quote(source, words) for source in sources):
+        if meeting and not any(_contains(source, words) or _near_quote(source, words) for source in sources):
+            # A meeting quote may run across speakers ("C: ... B: ...") or past a word the recognizer revised.
+            passage = _words(_SPEAKER_LABEL.sub(" ", quote))
+            if _passage_evidence(passage, sources):
+                words = passage
+        if not any(_contains(source, words) or _near_quote(source, words) or (meeting and _passage_evidence(words, sources))
+                   for source in sources):
             # A dictated number may be quoted without the backchannels between its groups.
             digits = _normalize(spec, op.get("value")) if _digits_field(spec) else None
             # Sources arrive as (new turns, unfinished turn, recent turns); a dictation can span all three.

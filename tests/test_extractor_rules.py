@@ -418,6 +418,38 @@ def test_whole_note_as_value_becomes_fact_lines(meeting):
         field: "The Marketing Expert said it should be waterproof."}
 
 
+def test_meeting_quote_across_speakers(meeting):
+    field = next(spec.field_id for spec in meeting.fields if spec.type.value == "textarea")
+    sources = ("C: Uh yes, we have plenty at home. In fact, my daughter likes l remote controls.",
+               "B: So that could be a great um application.")
+    quote = "C: Uh yes, we have plenty at home. In fact, my daughter likes l remote controls. B: So that could be"
+    reply = json.dumps({"set": [], "facts": [{"field": field, "add": ["Her daughter likes remote controls."],
+                                              "remove": [], "quote": quote}]})
+    assert parse_delta(meeting, {}, reply, evidence_sources=sources) == {field: "Her daughter likes remote controls."}
+    made_up = json.dumps({"set": [], "facts": [{"field": field, "add": ["x"], "remove": [],
+                                                "quote": "we agreed the remote should be yellow and round"}]})
+    assert parse_delta(meeting, {}, made_up, evidence_sources=sources) == {}
+
+
+def test_meeting_quote_running_past_a_revised_word(meeting):
+    field = next(spec.field_id for spec in meeting.fields if spec.type.value == "textarea")
+    text = "B: we're going to meet again in thirty minutes and uh I want you to mm work on these ideas"
+    reply = json.dumps({"set": [], "facts": [{"field": field, "add": ["Meet again in thirty minutes."], "remove": [],
+                                              "quote": "we're going to meet again in thirty minutes and uh I want "
+                                                       "you to mm work on these ideas and try to make a uh the"}]})
+    assert parse_delta(meeting, {}, reply, evidence_sources=(text,)) == {field: "Meet again in thirty minutes."}
+
+
+def test_several_meeting_notes_for_one_field_in_one_reply(meeting):
+    field = next(spec.field_id for spec in meeting.fields if spec.type.value == "textarea")
+    text = "D: No screens, it's too complex. A: Too expensive, yeah."
+    reply = json.dumps({"set": [], "facts": [
+        {"field": field, "add": ["No screens, too complex."], "remove": [], "quote": "No screens, it's too complex."},
+        {"field": field, "add": ["A screen is too expensive."], "remove": [], "quote": "Too expensive, yeah."}]})
+    assert parse_delta(meeting, {}, reply, evidence_sources=(text,)) == {
+        field: "No screens, too complex.\nA screen is too expensive."}
+
+
 def test_quote_with_one_corrected_word(form):
     text = "A: uh, i'd like to live the place of attraction by 11 a. m.."
     assert delta(form, "taxi_leave_at", "11:00", "leave the place of attraction by 11 a. m.", text) == {
