@@ -357,3 +357,36 @@ def test_stated_full_name_is_taken_once():
     agent = SpelledName()
     agent.observe("B", "my name is john smith, how can i help", None)
     assert agent.take_stated() is None
+
+
+@pytest.fixture(scope="module")
+def meeting():
+    data = load_dataset(load_config(), "ami", official_sample=True)
+    return next(iter(data.forms.values()))
+
+
+def test_meeting_topics_need_a_quote_not_the_topic_name(meeting):
+    text = "B: I'm first going to do an opening then we get used to one another"
+    reply = json.dumps({"set": [{"field": "topics", "value": ["opening", "chitchat"],
+                                 "quote": "I'm first going to do an opening"}], "facts": []})
+    assert parse_delta(meeting, {}, reply, evidence_sources=(text,)) == {"topics": ["opening", "chitchat"]}
+    reply = json.dumps({"set": [{"field": "topics", "value": ["opening"], "quote": "we discussed openings"}],
+                        "facts": []})
+    assert parse_delta(meeting, {}, reply, evidence_sources=(text,)) == {}
+
+
+def test_meeting_topics_sent_as_facts_are_selected(meeting):
+    text = "C: So she likes uh buttons which make click"
+    reply = json.dumps({"set": [], "facts": [{"field": "topics", "add": ["user requirements", "not a topic"],
+                                              "remove": [], "quote": "she likes uh buttons which make click"}]})
+    assert parse_delta(meeting, {"topics": ["opening"]}, reply, evidence_sources=(text,)) == {
+        "topics": ["opening", "user requirements"]}
+
+
+def test_whole_note_as_value_becomes_fact_lines(meeting):
+    field = next(spec.field_id for spec in meeting.fields if spec.type.value == "textarea")
+    text = "C: So they have to be waterproof maybe"
+    reply = json.dumps({"set": [{"field": field, "value": "The Marketing Expert said it should be waterproof.",
+                                 "quote": "they have to be waterproof"}], "facts": []})
+    assert parse_delta(meeting, {}, reply, evidence_sources=(text,)) == {
+        field: "The Marketing Expert said it should be waterproof."}

@@ -63,7 +63,8 @@ supported change, return {"set":[],"facts":[]}."""
 
 _FACTS = """For a textarea, put {"field":"<field ID>","add":["One new fact."],"remove":[],"quote":"<exact transcript>"}
 in "facts". The contiguous quote must support the fact edits.
-Follow the form's writing rules. Add only newly supported facts that answer that field's question. Each array item
+For a multiselect of topics, use "set" with every listed topic covered so far, as soon as the talk turns to it,
+with a quote from that passage; the topic's name need not be said. Follow the form's writing rules. Add only newly supported facts that answer that field's question. Each array item
 is one complete line. Avoid paraphrases of facts already present. Leave existing facts in place."""
 
 _CLEAR = ('When allow_clears is true, use null only for an explicit withdrawal without a replacement. Copy each '
@@ -533,9 +534,18 @@ def parse_delta(
         dropped.append({"field": op["field"], "value": op.get("value", op.get("add")), "quote": op["quote"][:160],
                         "reason": reason})
 
+    # Meeting topics are categories the talk covers, not words it says: a quoted passage is their evidence.
+    meeting = any(spec.type == FieldType.textarea for spec in form.fields)
     for op in [*facts, *assignments]:
         field_id = op["field"]
         spec = fields.get(field_id)
+        if spec is not None and meeting:
+            if "add" in op and spec.type == FieldType.multiselect:
+                additions = [item for item in _fact_lines(op.get("add")) if item in spec.options]
+                op = {"field": field_id, "value": [*(current.get(field_id) or []), *additions], "quote": op["quote"]}
+            elif "value" in op and spec.type == FieldType.textarea and isinstance(op["value"], str):
+                # A whole note sent as a value: keep its new lines as fact additions.
+                op = {"field": field_id, "add": op["value"].splitlines(), "remove": [], "quote": op["quote"]}
         if spec is None or field_id in delta:
             drop(op, "unknown_field" if spec is None else "repeated_field", grounding=False)
             continue
@@ -573,7 +583,7 @@ def parse_delta(
             if spec.type == FieldType.multiselect and value is not None:
                 prior = set(previous or [])
                 selected = set(value)
-                additions = {item for item in selected - prior if _ground_value(spec, item, quote, words)}
+                additions = {item for item in selected - prior if meeting or _ground_value(spec, item, quote, words)}
                 if selected - prior - additions:
                     drop(op, "option_not_supported")
                 keep = (prior & selected) if can_remove else prior
