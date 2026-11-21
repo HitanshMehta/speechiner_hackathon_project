@@ -36,6 +36,18 @@ RESPONSE_FORMAT = {
 }
 
 
+# Booking forms have no fact lines, so their replies drop the always-empty "facts" array (fewer output tokens).
+RESPONSE_FORMAT_SLOTS = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "form_delta", "strict": True,
+        "schema": _object({
+            "set": {"type": "array", "items": _object({"field": _STRING, "value": _VALUE, "quote": _STRING})},
+        }),
+    },
+}
+
+
 class DeltaError(ValueError):
     """A reply structure error whose code can be kept in the run log."""
 
@@ -62,6 +74,10 @@ value, including its literal words, number or spoken time. A question or mention
 Use the option strings exactly, JSON booleans and numbers, and HH:MM, YYYY-MM-DD or YYYY-MM-DDTHH:MM for timestamps.
 For multiselect, include existing options that still hold. Use at most one operation per field. If there is no
 supported change, return {"set":[],"facts":[]}."""
+
+_SET_ONLY = os.environ.get("GATED_SET_ONLY", "1") != "0"
+_SYSTEM_SLOTS = (_SYSTEM.replace("Return JSON with both arrays, like", "Return JSON like")
+                 .replace(',"facts":[]}', "}"))
 
 _FACTS = """For a textarea, put {"field":"<field ID>","add":["One new fact."],"remove":[],"quote":"<exact transcript>"}
 in "facts". The contiguous quote must support the fact edits.
@@ -190,8 +206,9 @@ def make_messages(
     allow_clear: bool = True,
 ) -> list[dict[str, str]]:
     """Keep the field definitions in a stable prefix and send only the caller's bounded text window."""
-    instructions = [_SYSTEM, _CLEAR]
-    if any(field.type == FieldType.textarea for field in form.fields):
+    meeting = any(field.type == FieldType.textarea for field in form.fields)
+    instructions = [_SYSTEM if meeting or not _SET_ONLY else _SYSTEM_SLOTS, _CLEAR]
+    if meeting:
         instructions.append(_FACTS)
     if any(_station_select(field) for field in form.fields):
         instructions.append(_STATION)
@@ -213,6 +230,12 @@ def make_messages(
     if final:
         evidence["final_pass"] = True
     return [{"role": "system", "content": "\n\n".join(instructions)}, {"role": "user", "content": _json(evidence)}]
+
+
+def response_format(messages: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The reply schema that matches the instructions in these messages."""
+    system = next((m["content"] for m in messages if m.get("role") == "system"), "")
+    return RESPONSE_FORMAT_SLOTS if isinstance(system, str) and system.startswith(_SYSTEM_SLOTS) else RESPONSE_FORMAT
 
 
 def _station_select(spec: FieldSpec) -> bool:
@@ -672,6 +695,8 @@ def _read_operations(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, Any
         document = json.loads(text)
     except (ValueError, RecursionError):
         raise DeltaError("invalid_delta_json") from None
+    if isinstance(document, dict) and document.keys() == {"set"}:
+        document = {**document, "facts": []}  # a booking form's set-only reply
     if not isinstance(document, dict) or document.keys() != {"set", "facts"}:
         raise DeltaError("invalid_delta_shape")
     assignments, facts = document["set"], document["facts"]

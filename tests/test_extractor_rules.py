@@ -669,3 +669,19 @@ def test_agent_i_got_that_keeps_dictation_open():
         ("A", "3, 7, 6."), ("B", "yes, i got that."), ("A", "1 7 2 8."),
     ])
     assert shown == {"profile_phone": "1613761728"}
+
+
+def test_booking_form_replies_without_facts(form):
+    from strategies.delta import RESPONSE_FORMAT_SLOTS, make_messages, response_format
+    messages = make_messages(form, {}, "A: i need a taxi.")
+    assert '"facts"' not in messages[0]["content"].split("\n\n")[0]
+    assert response_format(messages) is RESPONSE_FORMAT_SLOTS
+    reply = json.dumps({"set": [{"field": "services", "value": ["taxi"], "quote": "i need a taxi"}]})
+    assert parse_delta(form, {}, reply, evidence_sources=["A: i need a taxi."]) == {"services": ["taxi"]}
+
+
+def test_meeting_form_keeps_facts():
+    from strategies.delta import RESPONSE_FORMAT, make_messages, response_format
+    data = load_dataset(load_config(), "ami", official_sample=True)
+    meeting = next(iter(data.forms.values()))
+    assert response_format(make_messages(meeting, {}, "A: we should use rubber.")) is RESPONSE_FORMAT

@@ -25,7 +25,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from strategies.delta import RESPONSE_FORMAT
+from strategies.delta import response_format
 
 DEFAULT_MODEL = "google/gemini-2.5-flash"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -164,7 +164,7 @@ class OpenRouterClient:
         input_rate = self._rates["input_tokens"]
         output_rate = self._rates["output_tokens"]
         # UTF-8 bytes overestimate tokens on these text prompts. Extra room covers chat framing.
-        request_context = (messages, RESPONSE_FORMAT)
+        request_context = (messages, response_format(messages))
         input_upper_estimate = len(json.dumps(request_context, ensure_ascii=False).encode("utf-8")) + 1024
         largest_input_rate = max(input_rate, self._rates.get("cache_read_tokens", input_rate),
                                  self._rates.get("cache_write_tokens", input_rate))
@@ -205,7 +205,7 @@ class OpenRouterClient:
             "messages": _cacheable(messages),
             "temperature": 0,
             "max_tokens": max_tokens,
-            "response_format": RESPONSE_FORMAT,
+            "response_format": response_format(messages),
             "reasoning": {"enabled": False},
             "provider": {
                 "allow_fallbacks": False,
