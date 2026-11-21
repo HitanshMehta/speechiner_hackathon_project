@@ -30,16 +30,16 @@ data, runs and results paths moved. The scores compare our own versions only; th
 
 | Folder | Version | Score | € per form |
 |---|---|---|---|
-| `runs/20261121-182507-v14-extra24-spokenwoz` | **C** | 0.764 | 0.0044 |
-| `runs/20261121-184441-v15-extra24-spokenwoz` | B | 0.752 | 0.0047 |
-| `runs/20261121-180911-cache-compact-extra24-spokenwoz` | A | 0.743 | 0.0047 |
-| `runs/20261121-175330-final-extra24-spokenwoz` | earlier final | 0.735 | 0.0081 |
+| `run_folders/20261121-182507-v14-extra24-spokenwoz` | **C** | 0.764 | 0.0044 |
+| `run_folders/20261121-184441-v15-extra24-spokenwoz` | B | 0.752 | 0.0047 |
+| `run_folders/20261121-180911-cache-compact-extra24-spokenwoz` | A | 0.743 | 0.0047 |
+| `run_folders/20261121-175330-final-extra24-spokenwoz` | earlier final | 0.735 | 0.0081 |
 
 ```bash
-LFE_CONFIG=gated_runs/extra24/config.yaml uv run --locked lfe evaluate gated_runs/extra24/runs/* --out gated_runs/extra24/results
+LFE_CONFIG=gated_runs/extra24/config.yaml uv run --locked lfe evaluate gated_runs/extra24/run_folders/* --out gated_runs/extra24/scores
 ```
 
-## Scored tables (`results/`)
+## Scored tables (`scores/`)
 
 `summary.csv`, `per_conversation.csv`, `values.csv` and `calls.csv` from `lfe evaluate` for the official
 SpokenWOZ runs, the 24 extra calls and AMI (the HTML reports are left out to keep the folder small).

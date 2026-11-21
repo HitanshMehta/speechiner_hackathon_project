@@ -6,8 +6,8 @@ paths:
   raw: ~/datasets/live-form-eval/raw              # downloaded datasets (about 490 MB), outside the repo
   processed: gated_runs/extra24/processed                       # conversations, forms and gold (SpokenWOZ only): what every command reads
   audio: ~/datasets/live-form-eval/audio          # recordings, fetched one by one when `lfe ui` plays their sound
-  runs: gated_runs/extra24/runs                                      # one folder per run
-  results: gated_runs/extra24/results                                # tables, plots and reports written by `lfe evaluate`
+  runs: gated_runs/extra24/run_folders                                      # one folder per run
+  results: gated_runs/extra24/scores                                # tables, plots and reports written by `lfe evaluate`
 
 datasets:                 # the official sample of each dataset
   spokenwoz:
