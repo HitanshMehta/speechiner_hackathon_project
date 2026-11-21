@@ -163,6 +163,10 @@ class MyExtractor(Extractor):
                 if spelling is not None and message.kind == "turn":
                     for speaker, text in message.pieces():
                         publish_spelling(spelling.observe(speaker, text, current.get("profile_name")))
+                    # "my name is mary edwards" fills an empty name at once; the model may still correct it.
+                    if (stated := spelling.take_stated()) and "profile_name" not in current:
+                        session.update("profile_name", stated)
+                        current["profile_name"] = stated
                 changed.set()
             if spelling is not None:
                 publish_spelling(spelling.finish(current.get("profile_name")))

@@ -64,6 +64,7 @@ class SpelledName:
         self.caller = caller
         self.first_name: str | None = None
         self.last_name: str | None = None
+        self.stated: str | None = None  # "my name is mary edwards", until taken with take_stated()
         self.active = False
         self.target = "name"
         self.letters: list[str] = []
@@ -78,6 +79,7 @@ class SpelledName:
                 self.first_name = match[1]
             if (match := _FULL_NAME.search(words)) and not {match[1], match[2]} & _NOT_NAME:
                 self.first_name, self.last_name = match[1], match[2]
+                self.stated = f"{match[1]} {match[2]}"
             if (match := _LAST_NAME.search(words)) and match[1] not in _NOT_NAME:
                 self.last_name = match[1]
             return None
@@ -88,6 +90,11 @@ class SpelledName:
         if not self.active or not words or set(words.split()) <= _BACKCHANNEL:
             return None
         return self.finish(current)
+
+    def take_stated(self) -> str | None:
+        """A full name the caller just stated in so many words; returned once."""
+        stated, self.stated = self.stated, None
+        return stated
 
     def finish(self, current: str | None) -> str | None:
         if not self.active:

@@ -343,3 +343,17 @@ def test_dictation_spans_recent_and_new_turns(form):
     quote = "0, 3, 0, 3. 7 8 2 3."
     assert parse_delta(form, {}, op("profile_id_number", "03037823", quote),
                        evidence_sources=(new, "", recent)) == {"profile_id_number": "03037823"}
+
+
+def test_stated_full_name_is_taken_once():
+    tracker = SpelledName()
+    tracker.observe("A", "hi, my name is mary edwards.", None)
+    assert tracker.take_stated() == "mary edwards" and tracker.take_stated() is None
+    for text in ("my name is not important", "first name is rebecca. my last name is louie.",
+                 "you are speaking to rebecca lottery"):
+        other = SpelledName()
+        other.observe("A", text, None)
+        assert other.take_stated() is None, text
+    agent = SpelledName()
+    agent.observe("B", "my name is john smith, how can i help", None)
+    assert agent.take_stated() is None
