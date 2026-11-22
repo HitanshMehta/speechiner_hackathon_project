@@ -91,4 +91,4 @@ class Gate:
             return Schedule("slot_signal", due)
         if finished and informative >= 6:
             return Schedule("turn_batch", max(due, first_at + 1.5))
-        return Schedule("slot_deadline", max(due, first_at + 6))
+        return Schedule("slot_deadline", max(due, first_at + 3))
