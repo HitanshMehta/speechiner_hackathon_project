@@ -87,7 +87,7 @@ class Gate:
 
         due = last_call + _SLOT_SPACING_S
         has_option = self._has_option(lowered, tokens)
-        if confirmation or ((finished or informative >= 3) and (_EVIDENCE.search(evidence) or has_option)):
+        if confirmation or has_option or ((finished or informative >= 3) and _EVIDENCE.search(evidence)):
             return Schedule("slot_signal", due)
         if finished and informative >= 6:
             return Schedule("turn_batch", max(due, first_at + 1.5))
